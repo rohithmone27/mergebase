@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, Project } from "../types";
 import { ErrorBanner } from "./Home";
+import { BranchGlyph } from "../App";
 
 export function ProjectPage() {
   const { projectId = "" } = useParams();
@@ -30,9 +31,20 @@ export function ProjectPage() {
 
   return (
     <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/">Projects</Link>
+        <span className="sep">/</span>
+        <span>{project.name}</span>
+      </nav>
       <div className="page-head">
         <h1>{project.name}</h1>
         <span className="spacer" />
+        {branches.length >= 2 && (
+          <>
+            <Link className="btn" to={`/projects/${project.id}/diff`}>Diff branches</Link>
+            <Link className="btn" to={`/projects/${project.id}/merge`}>Merge…</Link>
+          </>
+        )}
         <button className="btn primary" onClick={() => setShowCreate(true)}>
           New branch
         </button>
@@ -45,9 +57,11 @@ export function ProjectPage() {
       <div className="card">
         {branches.map((b) => (
           <div key={b.id} className="branch-row">
+            <span className="glyph"><BranchGlyph /></span>
             <Link to={`/branches/${b.id}`} className="name mono">
               {b.name}
             </Link>
+            {b.name === "main" && <span className="default-tag">default</span>}
             <span className="meta">head {b.head_commit_id.slice(0, 8)}</span>
             <span className="spacer" />
             <Link to={`/branches/${b.id}`} className="btn">

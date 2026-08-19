@@ -1,5 +1,6 @@
 import type { Column, ObjectID, Schema, Table } from "../types";
 import { typeString } from "../types";
+import { TableGlyph } from "../App";
 
 // SchemaBrowser renders the whole schema as table cards. All references in
 // the model are by ID; names are resolved here, at display time.
@@ -42,16 +43,17 @@ function TableCard({ table, tableByID }: { table: Table; tableByID: Map<ObjectID
   return (
     <div className="card table-card">
       <header>
+        <span className="tglyph"><TableGlyph /></span>
         <span className="tname">{table.name}</span>
-        <span className="count">{columns.length} columns</span>
+        <span className="count">{columns.length} cols</span>
       </header>
       {columns.map((col) => (
         <div key={col.id} className="col-row">
           <span className="cname">{col.name}</span>
-          <span className="ctype">{typeString(col.type)}</span>
-          <span className="cflags">
+          <span className="cmeta">
+            <span className="ctype">{typeString(col.type)}</span>
             {pkCols.has(col.id) && <span className="badge pk">PK</span>}
-            {fkByCol.has(col.id) && <span className="badge fk">FK → {fkByCol.get(col.id)}</span>}
+            {fkByCol.has(col.id) && <span className="badge fk">FK→{fkByCol.get(col.id)}</span>}
             {uniqueCols.has(col.id) && <span className="badge uq">UQ</span>}
             {!col.nullable && !pkCols.has(col.id) && <span className="cnull">not null</span>}
             {col.default && <span className="cdefault">= {col.default}</span>}

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Project, Unsupported } from "../types";
+import { BranchGlyph } from "../App";
 
 const SAMPLE_DDL = `CREATE TABLE customers (
     id         BIGSERIAL PRIMARY KEY,
@@ -38,17 +39,22 @@ export function Home() {
 
   return (
     <>
+      <div className="hero">
+        <h1>
+          Branch a schema. <span className="dim">Merge it back safely.</span>
+        </h1>
+        <p>
+          A project versions one database schema the way Git versions code: branch it, evolve branches independently,
+          see exactly what diverged, and merge back with conflicts surfaced — never guessed.
+        </p>
+      </div>
       <div className="page-head">
-        <h1>Projects</h1>
+        <h1 style={{ fontSize: "1.1rem" }}>Projects</h1>
         <span className="spacer" />
         <button className="btn primary" onClick={() => setShowCreate(true)}>
           New project
         </button>
       </div>
-      <p className="page-sub">
-        A project versions one database schema. Branch it, evolve branches independently, diff them, and merge back
-        with conflicts surfaced — the schema is the artifact, no data rows involved.
-      </p>
 
       {error && <ErrorBanner error={error} />}
       {projects === null && !error && <div className="loading">Loading projects…</div>}
@@ -66,8 +72,10 @@ export function Home() {
         <div className="project-grid">
           {projects.map((p) => (
             <Link key={p.id} to={`/projects/${p.id}`} className="card project-card">
+              <div className="glyph"><BranchGlyph size={20} /></div>
               <h3>{p.name}</h3>
               <div className="meta">created {new Date(p.created_at).toLocaleDateString()}</div>
+              <span className="go" aria-hidden>→</span>
             </Link>
           ))}
         </div>

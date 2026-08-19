@@ -9,6 +9,7 @@ export function DiffPage() {
   const { projectId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [projectName, setProjectName] = useState("");
   const [changes, setChanges] = useState<Change[] | null>(null);
   const [unchanged, setUnchanged] = useState(0);
   const [names, setNames] = useState<{ from: string; to: string }>({ from: "", to: "" });
@@ -20,6 +21,7 @@ export function DiffPage() {
   useEffect(() => {
     api.getProject(projectId).then((res) => {
       setBranches(res.branches);
+      setProjectName(res.project.name);
       // Sensible default: main vs the first non-main branch.
       if (!params.get("from") && res.branches.length >= 2) {
         const main = res.branches.find((b) => b.name === "main") ?? res.branches[0];
@@ -45,8 +47,15 @@ export function DiffPage() {
 
   return (
     <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/">Projects</Link>
+        <span className="sep">/</span>
+        <Link to={`/projects/${projectId}`}>{projectName || "project"}</Link>
+        <span className="sep">/</span>
+        <span>diff</span>
+      </nav>
       <div className="page-head">
-        <h1><Link to={`/projects/${projectId}`}>← project</Link> Diff</h1>
+        <h1>Diff</h1>
         <span className="spacer" />
         {from && to && (
           <Link className="btn" to={`/projects/${projectId}/migration?from=${from}&to=${to}`}>

@@ -13,6 +13,7 @@ export function MergePage() {
   const { projectId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [projectName, setProjectName] = useState("");
   const [error, setError] = useState<RequestError | null>(null);
 
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
@@ -32,6 +33,7 @@ export function MergePage() {
   useEffect(() => {
     api.getProject(projectId).then((res) => {
       setBranches(res.branches);
+      setProjectName(res.project.name);
       if (!params.get("target") && res.branches.length >= 2) {
         const main = res.branches.find((b) => b.name === "main") ?? res.branches[0];
         const other = res.branches.find((b) => b.id !== main.id)!;
@@ -108,8 +110,15 @@ export function MergePage() {
 
   return (
     <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/">Projects</Link>
+        <span className="sep">/</span>
+        <Link to={`/projects/${projectId}`}>{projectName || "project"}</Link>
+        <span className="sep">/</span>
+        <span>merge</span>
+      </nav>
       <div className="page-head">
-        <h1><Link to={`/projects/${projectId}`}>← project</Link> Merge</h1>
+        <h1>Merge</h1>
       </div>
       <p className="page-sub">
         A three-way merge against the branches' common ancestor: changes that don't overlap combine automatically;

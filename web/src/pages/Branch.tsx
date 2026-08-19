@@ -6,6 +6,7 @@ import { ErrorBanner } from "./Home";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import { EditSchema } from "../components/EditSchema";
 import { ImportDDL } from "../components/ImportDDL";
+import { BranchGlyph } from "../App";
 
 export function BranchPage() {
   const { branchId = "" } = useParams();
@@ -16,6 +17,7 @@ export function BranchPage() {
   const [error, setError] = useState<RequestError | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [projectName, setProjectName] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -24,6 +26,7 @@ export function BranchPage() {
       setSchema(schemaRes.schema);
       setUnsupported(schemaRes.unsupported ?? []);
       setCommits(commitsRes.commits);
+      api.getProject(schemaRes.branch.project_id).then((p) => setProjectName(p.project.name)).catch(() => {});
     } catch (e) {
       if (e instanceof RequestError) setError(e);
     }
@@ -36,11 +39,19 @@ export function BranchPage() {
   if (error) return <ErrorBanner error={error} />;
   if (!branch || !schema) return <div className="loading">Loading branch…</div>;
 
+  const lastCommit = commits[0];
   return (
     <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/">Projects</Link>
+        <span className="sep">/</span>
+        <Link to={`/projects/${branch.project_id}`}>{projectName || "project"}</Link>
+        <span className="sep">/</span>
+        <span>{branch.name}</span>
+      </nav>
       <div className="page-head">
         <h1>
-          <Link to={`/projects/${branch.project_id}`}>← project</Link>{" "}
+          <span style={{ color: "var(--accent)" }}><BranchGlyph size={20} /></span>
           <span className="mono">{branch.name}</span>
         </h1>
         <span className="spacer" />
@@ -48,6 +59,11 @@ export function BranchPage() {
         <button className="btn" onClick={() => setShowEdit(true)}>Edit schema</button>
         <Link className="btn" to={`/projects/${branch.project_id}/diff?from=${branch.id}`}>Diff</Link>
         <Link className="btn primary" to={`/projects/${branch.project_id}/merge?source=${branch.id}`}>Merge…</Link>
+      </div>
+      <div className="meta-chips">
+        <span>head {branch.head_commit_id.slice(0, 8)}</span>
+        <span>{schema.tables.length} tables</span>
+        {lastCommit && <span>last change {new Date(lastCommit.created_at).toLocaleDateString()}</span>}
       </div>
 
       {unsupported.length > 0 && (
@@ -72,17 +88,19 @@ export function BranchPage() {
         </div>
         <aside className="card panel">
           <h2>History</h2>
-          {commits.map((c) => (
-            <div key={c.id} className="commit">
-              <div className="msg">
-                {c.parent2_id && <span className="merge-tag">MERGE </span>}
-                {c.message}
+          <div className="rail">
+            {commits.map((c) => (
+              <div key={c.id} className={"commit" + (c.parent2_id ? " merge" : "")}>
+                <div className="msg">
+                  {c.parent2_id && <span className="merge-tag">MERGE</span>}
+                  {c.message}
+                </div>
+                <div className="who">
+                  {c.author || "someone"} · {new Date(c.created_at).toLocaleDateString()} · {c.tables} tables
+                </div>
               </div>
-              <div className="who">
-                {c.author || "unknown"} · {new Date(c.created_at).toLocaleString()} · {c.tables} tables
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </aside>
       </div>
 

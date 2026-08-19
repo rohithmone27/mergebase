@@ -10,6 +10,7 @@ export function MigrationPage() {
   const { projectId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [projectName, setProjectName] = useState("");
   const [sql, setSql] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<MigrationWarning[]>([]);
   const [names, setNames] = useState({ from: "", to: "" });
@@ -20,7 +21,7 @@ export function MigrationPage() {
   const to = params.get("to") ?? "";
 
   useEffect(() => {
-    api.getProject(projectId).then((res) => setBranches(res.branches))
+    api.getProject(projectId).then((res) => { setBranches(res.branches); setProjectName(res.project.name); })
       .catch((e) => e instanceof RequestError && setError(e));
   }, [projectId]);
 
@@ -47,8 +48,15 @@ export function MigrationPage() {
 
   return (
     <>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <Link to="/">Projects</Link>
+        <span className="sep">/</span>
+        <Link to={`/projects/${projectId}`}>{projectName || "project"}</Link>
+        <span className="sep">/</span>
+        <span>migration</span>
+      </nav>
       <div className="page-head">
-        <h1><Link to={`/projects/${projectId}`}>← project</Link> Migration script</h1>
+        <h1>Migration script</h1>
         <span className="spacer" />
         {sql && (
           <>
