@@ -177,7 +177,63 @@ commit → ordered migration script. PostgreSQL dialect only, one shared workspa
   handled where it matters: branch-head moves are compare-and-swap inside the commit
   transaction, so two simultaneous merges cannot silently discard each other.
 
-### 12. Migrations are generated, never executed — 2026-08-18
+### 12. Conflicts are collected in one pass, with a never-committed fallback — 2026-08-19
+
+- **Decision:** when the merge hits an unresolved conflict it records it and
+  continues with ours' value, so ONE preview surfaces EVERY conflict. The
+  fallback result is never committed — a merge with any unresolved conflict
+  refuses with 409 and no schema.
+- **Alternatives:** stop at the first conflict (simpler engine, miserable UX:
+  resolve one, re-preview, discover the next); build a partial result object
+  with holes (complex, no gain).
+- **Reasoning:** the user should see the whole cost of a merge before
+  resolving anything. Safety comes from the commit gate, not from refusing
+  to keep computing.
+- **Cut:** nothing.
+
+### 13. Import decisions key on head-side IDs — 2026-08-20 (found by a failing test)
+
+- **Decision:** a rename confirmation is `{old_id, rename}` where old_id is
+  the head snapshot's stable ID — never the imported side's ID.
+- **Alternatives:** `{old_id, new_id}` referencing the freshly parsed object
+  (my first design — it failed its own integration test).
+- **Reasoning:** the confirm round re-parses the DDL, and the parser mints
+  NEW fresh IDs every time, so the previous round's new_id can never match.
+  The head ID is the only stable handle across rounds; the matcher re-derives
+  the same best candidate deterministically and applies the answer to it.
+  Kept the failing-then-fixed test as the regression guard.
+- **Cut:** server-side import sessions that would have pinned the parsed
+  result between rounds — a stateless confirm round is simpler and survives
+  restarts.
+
+### 14. JSON contract: always lists, never null — 2026-08-20 (found by browser verification)
+
+- **Decision:** every API field that is conceptually a list serializes as a
+  list, even when empty.
+- **Alternatives:** leave Go's default (nil slice → JSON null) and
+  null-guard the client.
+- **Reasoning:** the first full browser run of the merge screen crashed on
+  `null.length` — Go's nil-slice default leaked into the API contract. Fixed
+  at the source (the contract) AND defensively in the client, because a
+  contract you have to remember is a contract that will break again.
+- **Cut:** nothing.
+
+### 15. Test budget: engines exhaustive, UI verified by driven browser journeys — 2026-08-20
+
+- **Decision:** the engine packages carry the deep suites (conflict taxonomy
+  both ways, phased-migration ordering, circular FKs, rename swaps, identity
+  invariants, CAS races); the API has end-to-end journey tests; the React UI
+  has no component-test suite and is instead verified by scripted real-browser
+  runs of the full reviewer journey before every milestone.
+- **Alternatives:** Jest/RTL component tests for the frontend.
+- **Reasoning:** five days buy either broad UI snapshot tests or deep engine
+  proofs — the evaluation (and the correctness risk) lives in the engines.
+  The browser journeys catch what component tests wouldn't have anyway: the
+  null-contract crash above was found by a driven browser, not a unit test.
+- **Cut / accepted trade-off:** UI regressions between browser runs can slip
+  in unnoticed; accepted for a 6-day artifact and said out loud here.
+
+### 16. Migrations are generated, never executed — 2026-08-18
 
 - **Decision:** the migration script is produced to view, copy, or download. Mergebase
   never connects to a user's database and never runs DDL.

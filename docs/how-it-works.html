@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mergebase — how the whole flow works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  --paper:#edf0f3; --surface:#ffffff; --sunken:#f5f7f9;
+  --ink:#12171e; --muted:#5a6673; --faint:#8a94a2;
+  --line:#d8dee6; --hair:#e6eaf0;
+  --accent:#4b45d6; --accent-ink:#3d38b8; --accent-soft:#e9e8fb;
+  --add:#12793f; --add-soft:#e3f5e9;
+  --del:#c0392b; --del-soft:#fbe9e7;
+  --warn:#8a6100; --warn-soft:#fbf1dd;
+  --neutral:#7a8492;
+  --shadow:0 1px 2px rgba(18,23,30,.05), 0 8px 24px -16px rgba(18,23,30,.35);
+}
+@media (prefers-color-scheme: dark){
+  html[data-theme="auto"]{
+    --paper:#0f1319; --surface:#171c24; --sunken:#12161d;
+    --ink:#e6eaf0; --muted:#98a3b2; --faint:#6f7b8b;
+    --line:#28303b; --hair:#212832;
+    --accent:#8e8bf5; --accent-ink:#a5a2ff; --accent-soft:#22224a;
+    --add:#4cc46e; --add-soft:#12291b;
+    --del:#ff7b72; --del-soft:#2c1715;
+    --warn:#d9a62e; --warn-soft:#2a2110;
+    --neutral:#8b95a4;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+html[data-theme="dark"]{
+  --paper:#0f1319; --surface:#171c24; --sunken:#12161d;
+  --ink:#e6eaf0; --muted:#98a3b2; --faint:#6f7b8b;
+  --line:#28303b; --hair:#212832;
+  --accent:#8e8bf5; --accent-ink:#a5a2ff; --accent-soft:#22224a;
+  --add:#4cc46e; --add-soft:#12291b;
+  --del:#ff7b72; --del-soft:#2c1715;
+  --warn:#d9a62e; --warn-soft:#2a2110;
+  --neutral:#8b95a4;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:Newsreader,Georgia,serif; font-size:18px; line-height:1.65;
+  font-optical-sizing:auto;
+}
+::selection{background:var(--accent-soft); color:var(--accent-ink)}
+a{color:var(--accent-ink); text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:3px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+
+/* ---------- top bar ---------- */
+.topbar{
+  position:sticky; top:0; z-index:50;
+  display:flex; align-items:center; gap:.9rem;
+  padding:.55rem max(1.1rem, calc(50vw - 490px));
+  background:color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hair);
+}
+.mark{
+  font-family:"JetBrains Mono",monospace; font-weight:700; font-size:.74rem;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--ink);
+  display:flex; align-items:center; gap:.5rem;
+}
+.mark .node{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.topbar .spacer{flex:1}
+.topbar .where{font-family:"JetBrains Mono",monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+button.theme{
+  font-family:"JetBrains Mono",monospace; font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+  background:var(--surface); color:var(--muted); border:1px solid var(--line);
+  padding:.34rem .7rem; border-radius:999px; cursor:pointer;
+}
+button.theme:hover{color:var(--ink); border-color:var(--muted)}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1020px; margin:0 auto; padding:0 1.1rem 6rem}
+
+/* ---------- hero ---------- */
+.hero{padding:3.4rem 0 1.2rem}
+.eyebrow{
+  font-family:"JetBrains Mono",monospace; font-size:.7rem; font-weight:500;
+  letter-spacing:.18em; text-transform:uppercase; color:var(--accent-ink);
+  display:flex; align-items:center; gap:.6rem;
+}
+.eyebrow::after{content:""; height:1px; flex:1; background:linear-gradient(90deg,var(--line),transparent)}
+h1{
+  font-family:"Space Grotesk",system-ui,sans-serif; font-weight:700;
+  font-size:clamp(2.5rem,7vw,4.2rem); line-height:.98; letter-spacing:-.035em;
+  margin:1rem 0 0; text-wrap:balance;
+}
+h1 .dim{color:var(--muted); font-weight:500}
+.deck{
+  font-size:clamp(1.05rem,2.4vw,1.28rem); color:var(--muted); max-width:60ch;
+  margin:1.1rem 0 0; line-height:1.55;
+}
+.deck b{color:var(--ink); font-weight:600}
+.facts{
+  display:flex; flex-wrap:wrap; gap:.4rem .5rem; margin-top:1.6rem;
+  font-family:"JetBrains Mono",monospace; font-size:.7rem; letter-spacing:.06em;
+}
+.facts span{
+  background:var(--surface); border:1px solid var(--line); color:var(--muted);
+  padding:.3rem .65rem; border-radius:999px;
+}
+.facts span b{color:var(--ink); font-weight:500}
+
+/* hero diagram */
+.herofig{margin:2.2rem 0 0; background:var(--surface); border:1px solid var(--line);
+  border-radius:14px; padding:1.4rem 1rem 1rem; box-shadow:var(--shadow); overflow:hidden}
+.herofig .scrollx{overflow-x:auto; -webkit-overflow-scrolling:touch}
+.herofig svg{display:block; margin:0 auto; min-width:660px; max-width:900px; width:100%; height:auto}
+.herocap{font-family:"JetBrains Mono",monospace; font-size:.7rem; letter-spacing:.05em;
+  color:var(--faint); text-align:center; margin:.9rem 0 0}
+
+/* ---------- toc ---------- */
+.toc{margin:2.6rem 0 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:1rem 0}
+.toc-h{font-family:"JetBrains Mono",monospace; font-size:.66rem; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--faint); margin:0 0 .7rem}
+.toc ol{list-style:none; margin:0; padding:0; display:grid; gap:.1rem .9rem;
+  grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); counter-reset:t}
+.toc a{
+  display:flex; gap:.6rem; align-items:baseline; text-decoration:none; color:var(--ink);
+  font-family:"Space Grotesk",sans-serif; font-size:.9rem; font-weight:500; padding:.28rem 0;
+}
+.toc a::before{counter-increment:t; content:counter(t,decimal-leading-zero);
+  font-family:"JetBrains Mono",monospace; font-size:.68rem; color:var(--faint); font-weight:400}
+.toc a:hover{color:var(--accent-ink)}
+.toc a:hover::before{color:var(--accent)}
+
+/* ---------- article + commit rail ---------- */
+.body{position:relative; padding-left:3.2rem; margin-top:1rem}
+.body::before{content:""; position:absolute; left:11px; top:2.6rem; bottom:2rem; width:2px;
+  background:linear-gradient(180deg,transparent,var(--line) 3%,var(--line) 97%,transparent)}
+section{padding-top:2.6rem}
+h2{
+  position:relative; font-family:"Space Grotesk",sans-serif; font-weight:700;
+  font-size:clamp(1.35rem,3vw,1.7rem); line-height:1.15; letter-spacing:-.02em;
+  margin:0 0 .3rem; text-wrap:balance;
+}
+h2::before{
+  content:""; position:absolute; left:-3.2rem; top:.42em;
+  width:11px; height:11px; border-radius:50%;
+  background:var(--paper); border:2.5px solid var(--line);
+}
+section.key h2::before{background:var(--accent); border-color:var(--accent);
+  box-shadow:0 0 0 4px var(--accent-soft)}
+.kicker{
+  font-family:"JetBrains Mono",monospace; font-size:.68rem; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--faint); margin:0 0 .55rem; display:block;
+}
+section.key .kicker{color:var(--accent-ink)}
+h3{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:1.02rem;
+  letter-spacing:-.01em; margin:2rem 0 .35rem}
+h3 .cid{font-family:"JetBrains Mono",monospace; font-size:.78rem; color:var(--accent-ink); margin-right:.45rem}
+p{margin:.7rem 0; max-width:66ch}
+ul,ol{padding-left:1.2rem; margin:.7rem 0; max-width:64ch}
+li{margin:.32rem 0}
+li::marker{color:var(--faint)}
+strong{font-weight:600}
+em{font-style:italic}
+code{font-family:"JetBrains Mono",monospace; font-size:.82em; background:var(--sunken);
+  border:1px solid var(--hair); padding:.08em .35em; border-radius:4px}
+pre{font-family:"JetBrains Mono",monospace; background:var(--sunken); border:1px solid var(--line);
+  border-radius:10px; padding:1rem 1.1rem; overflow-x:auto; font-size:.78rem; line-height:1.6; margin:1.1rem 0}
+pre code{background:none; border:none; padding:0; font-size:inherit}
+
+/* ---------- figures ---------- */
+figure{margin:1.7rem 0; background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:1.2rem 1rem .9rem; box-shadow:var(--shadow)}
+figure .scrollx{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -.4rem; padding:0 .4rem}
+figure svg{display:block; margin:0 auto; width:100%; height:auto}
+figure svg.wide{min-width:680px}
+figure svg.med{min-width:560px}
+figcaption{display:flex; gap:.7rem; align-items:baseline; margin:1rem .2rem 0;
+  border-top:1px solid var(--hair); padding-top:.7rem}
+figcaption .fno{font-family:"JetBrains Mono",monospace; font-size:.66rem; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--accent-ink); white-space:nowrap; font-weight:500}
+figcaption .ftx{font-family:"Space Grotesk",sans-serif; font-size:.82rem; color:var(--muted); line-height:1.45}
+
+/* svg helper classes */
+.s-line{stroke:var(--line)}
+.s-ink{stroke:var(--ink)}
+text{fill:var(--ink)}
+.t-mono{font-family:"JetBrains Mono",monospace}
+.t-disp{font-family:"Space Grotesk",sans-serif; font-weight:600}
+.t-muted{fill:var(--muted)}
+.t-faint{fill:var(--faint)}
+.t-acc{fill:var(--accent-ink)}
+.t-add{fill:var(--add)}
+.t-del{fill:var(--del)}
+.t-warn{fill:var(--warn)}
+.box{fill:var(--surface); stroke:var(--line); stroke-width:1.4}
+.box-sunk{fill:var(--sunken); stroke:var(--line); stroke-width:1.4}
+.box-acc{fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.8}
+.box-add{fill:var(--add-soft); stroke:var(--add); stroke-width:1.4}
+.box-del{fill:var(--del-soft); stroke:var(--del); stroke-width:1.4}
+.box-warn{fill:var(--warn-soft); stroke:var(--warn); stroke-width:1.4}
+.arrow{stroke:var(--neutral); stroke-width:1.5; fill:none}
+.arrow-acc{stroke:var(--accent); stroke-width:1.8; fill:none}
+.dash{stroke-dasharray:5 4}
+
+/* ---------- callouts ---------- */
+.note{background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent);
+  border-radius:10px; padding:.9rem 1.1rem; margin:1.4rem 0; max-width:66ch}
+.note.warn{border-left-color:var(--warn)}
+.note.stop{border-left-color:var(--del)}
+.note.good{border-left-color:var(--add)}
+.note p{margin:.4rem 0}
+.note p:first-child{margin-top:0}
+.note p:last-child{margin-bottom:0}
+.nlabel{font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:.72rem;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--accent-ink)}
+.note.warn .nlabel{color:var(--warn)}
+.note.stop .nlabel{color:var(--del)}
+.note.good .nlabel{color:var(--add)}
+
+/* ---------- glossary ---------- */
+dl.gloss{display:grid; grid-template-columns:auto 1fr; gap:.15rem 1.1rem; margin:1.1rem 0; max-width:70ch}
+dl.gloss dt{font-family:"JetBrains Mono",monospace; font-size:.78rem; font-weight:500;
+  color:var(--accent-ink); padding-top:.25rem; white-space:nowrap}
+dl.gloss dd{margin:0; color:var(--muted); font-size:.95rem; padding-top:.1rem}
+@media (max-width:620px){dl.gloss{grid-template-columns:1fr; gap:.1rem}dl.gloss dd{margin-bottom:.6rem}}
+
+/* ---------- tables ---------- */
+.tw{overflow-x:auto; margin:1.2rem 0}
+table{border-collapse:collapse; width:100%; font-size:.88rem; min-width:480px}
+th{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:.7rem; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--faint); text-align:left; padding:.5rem .7rem;
+  border-bottom:1.5px solid var(--ink)}
+td{padding:.55rem .7rem; border-bottom:1px solid var(--hair); vertical-align:top; color:var(--muted)}
+td:first-child{color:var(--ink)}
+tr:last-child td{border-bottom:none}
+
+/* ---------- step strip ---------- */
+.steps{list-style:none; padding:0; margin:1.2rem 0; counter-reset:s; max-width:100%}
+.steps li{position:relative; padding-left:2.5rem; margin:.9rem 0; max-width:64ch}
+.steps li::before{counter-increment:s; content:counter(s);
+  position:absolute; left:0; top:.05rem; width:1.7rem; height:1.7rem; border-radius:8px;
+  background:var(--accent-soft); color:var(--accent-ink); border:1px solid var(--accent);
+  font-family:"JetBrains Mono",monospace; font-size:.75rem; font-weight:500;
+  display:flex; align-items:center; justify-content:center}
+
+/* ---------- invariant cards ---------- */
+.inv{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:.7rem; margin:1.2rem 0}
+.inv div{background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:.8rem .95rem}
+.inv b{font-family:"JetBrains Mono",monospace; font-size:.68rem; letter-spacing:.1em;
+  color:var(--accent-ink); display:block; margin-bottom:.25rem; text-transform:uppercase}
+.inv span{font-size:.92rem; color:var(--muted); line-height:1.5}
+
+footer.end{margin:4rem 0 0; padding-top:1.4rem; border-top:1px solid var(--line);
+  font-family:"JetBrains Mono",monospace; font-size:.72rem; color:var(--faint); letter-spacing:.04em}
+
+@media (max-width:720px){
+  body{font-size:17px}
+  .body{padding-left:1.9rem}
+  .body::before{left:5px}
+  h2::before{left:-1.9rem; width:9px; height:9px}
+  .wrap{padding:0 .9rem 4rem}
+}
+
+/* ---------- motion ---------- */
+@media (prefers-reduced-motion:no-preference){
+  .draw{stroke-dasharray:var(--len,600); stroke-dashoffset:var(--len,600);
+    animation:draw 1.5s cubic-bezier(.65,0,.35,1) forwards}
+  .pop{opacity:0; animation:pop .5s ease forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  @keyframes pop{from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none}}
+  .reveal{opacity:0; transform:translateY(10px); transition:opacity .6s ease, transform .6s ease}
+  .reveal.in{opacity:1; transform:none}
+}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="mark"><span class="node"></span>Mergebase</div>
+  <div class="spacer"></div>
+  <div class="where">flow walkthrough</div>
+  <button class="theme" id="themeBtn" type="button" aria-label="Switch colour theme">theme</button>
+</div>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Zamp · project round · how it works</div>
+  <h1>Branch a schema.<br><span class="dim">Merge it back safely.</span></h1>
+  <p class="deck">Your code lives in Git. Your <b>database schema</b> — the tables and columns everything else stands on — usually doesn't. Two people change it in parallel and reconcile by hand. Mergebase gives the schema the same safety net: <b>branch, diff, merge, validate, migrate</b>. This page walks the whole flow, end to end.</p>
+  <div class="facts">
+    <span>Versioned unit <b>the schema, not the rows</b></span>
+    <span>Engine <b>Go · pure packages</b></span>
+    <span>State <b>one SQLite file</b></span>
+    <span>Output <b>ordered migration SQL</b></span>
+  </div>
+
+  <div class="herofig">
+    <div class="scrollx">
+    <svg viewBox="0 0 900 268" role="img" aria-label="A commit graph: main runs left to right, a feature branch splits off at the merge-base commit, both sides gather their own commits, and the feature branch merges back into main as a merge commit.">
+      <g class="arrow" stroke-width="2.2">
+        <path d="M70 186 H700" style="--len:640" class="draw" stroke="var(--neutral)"/>
+        <path d="M170 186 C 214 186, 222 76, 268 76 H600" style="--len:480" class="draw" stroke="var(--accent)"/>
+        <path d="M600 76 C 650 76, 656 186, 700 186" style="--len:150" class="draw" stroke="var(--accent)"/>
+        <path d="M700 186 H840" style="--len:140" class="draw" stroke="var(--neutral)"/>
+      </g>
+
+      <!-- main commits -->
+      <g>
+        <circle cx="70" cy="186" r="7" fill="var(--surface)" stroke="var(--neutral)" stroke-width="2.4"/>
+        <circle cx="170" cy="186" r="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.4"/>
+        <circle cx="170" cy="186" r="13.5" fill="none" stroke="var(--accent)" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <circle cx="380" cy="186" r="7" fill="var(--surface)" stroke="var(--neutral)" stroke-width="2.4"/>
+        <circle cx="490" cy="186" r="7" fill="var(--surface)" stroke="var(--neutral)" stroke-width="2.4"/>
+        <circle cx="700" cy="186" r="10" fill="var(--accent)" stroke="var(--accent)" stroke-width="2.4"/>
+        <circle cx="840" cy="186" r="7" fill="var(--surface)" stroke="var(--neutral)" stroke-width="2.4"/>
+      </g>
+      <!-- feature commits -->
+      <g>
+        <circle cx="300" cy="76" r="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.4"/>
+        <circle cx="430" cy="76" r="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.4"/>
+        <circle cx="545" cy="76" r="7" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.4"/>
+      </g>
+
+      <g class="t-mono" font-size="11" text-anchor="middle">
+        <text class="t-faint" x="300" y="52">+ invoices table</text>
+        <text class="t-faint" x="430" y="52">+ index on currency</text>
+        <text class="t-faint" x="545" y="52">email → TEXT · rename name</text>
+        <text class="t-faint" x="380" y="216">+ refunds table</text>
+        <text class="t-faint" x="490" y="216">email → varchar(500)</text>
+      </g>
+
+      <g class="t-mono" font-size="12" font-weight="500">
+        <text class="t-muted" x="42" y="163">main</text>
+        <text class="t-acc" x="276" y="30">feature/billing</text>
+      </g>
+
+      <g class="t-mono" font-size="11" text-anchor="middle">
+        <text class="t-acc" x="170" y="240" font-weight="500">merge-base</text>
+        <text class="t-faint" x="170" y="255">last shared commit</text>
+        <text class="t-acc" x="700" y="240" font-weight="500">merge commit</text>
+        <text class="t-faint" x="700" y="255">two parents</text>
+      </g>
+
+      <g class="pop" style="animation-delay:1.1s">
+        <path d="M494 196 L494 172" stroke="var(--del)" stroke-width="1.2" stroke-dasharray="3 3" fill="none"/>
+        <path d="M545 90 L545 118" stroke="var(--del)" stroke-width="1.2" stroke-dasharray="3 3" fill="none"/>
+        <rect x="452" y="118" width="186" height="54" rx="8" class="box-del"/>
+        <text class="t-mono t-del" x="545" y="139" font-size="11.5" text-anchor="middle" font-weight="500">both sides touched</text>
+        <text class="t-mono t-del" x="545" y="155" font-size="11.5" text-anchor="middle">both retype users.email → conflict</text>
+      </g>
+    </svg>
+    </div>
+    <p class="herocap">One graph, two lines of work, one place where they disagree — that disagreement is the whole product.</p>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <p class="toc-h">The flow, in order</p>
+  <ol>
+    <li><a href="#s1">What it version-controls</a></li>
+    <li><a href="#s2">Version the model, not the text</a></li>
+    <li><a href="#s3">Identity that survives renames</a></li>
+    <li><a href="#s4">Commits, branches, merge-base</a></li>
+    <li><a href="#s5">Semantic diff</a></li>
+    <li><a href="#s6">Three-way merge</a></li>
+    <li><a href="#s7">The eight conflict kinds</a></li>
+    <li><a href="#s8">Validation after the merge</a></li>
+    <li><a href="#s9">The migration script</a></li>
+    <li><a href="#s10">How a click travels</a></li>
+    <li><a href="#s11">The three-minute walkthrough</a></li>
+    <li><a href="#s12">What the system promises</a></li>
+  </ol>
+</nav>
+
+<article class="body">
+
+<section id="s1">
+  <span class="kicker">01 · the object under version control</span>
+  <h2>What it version-controls</h2>
+  <p>Not code. Not rows of data. The <strong>schema</strong> — which tables exist, what columns they have, their types, their constraints, their indexes. That structure is the thing two engineers change in parallel and then have to reconcile, and it is the thing Mergebase treats the way Git treats a file tree.</p>
+  <dl class="gloss">
+    <dt>schema</dt><dd>The blueprint of a database: tables, columns, types, constraints, indexes. No data rows.</dd>
+    <dt>DDL</dt><dd>The SQL that creates a schema (<code>CREATE TABLE …</code>). It's how a schema comes in and how results go back out.</dd>
+    <dt>commit</dt><dd>A permanent snapshot of the schema at one moment, with a message. Commits never change once made.</dd>
+    <dt>branch</dt><dd>A named line of work — a pointer to its latest commit. Two branches evolve the same schema independently.</dd>
+    <dt>merge-base</dt><dd>The most recent commit two branches share. Everything after it is what each side changed.</dd>
+    <dt>migration</dt><dd>The ordered SQL that would carry a real database from one schema version to the next.</dd>
+  </dl>
+  <p>Row data is out of scope by design, and the assignment says so directly. Everything below assumes that boundary.</p>
+</section>
+
+<section id="s2" class="key">
+  <span class="kicker">02 · the founding decision</span>
+  <h2>Version the model, not the text</h2>
+  <p>Incoming DDL is parsed into a structured model. Everything after that — diff, merge, validation, migration — operates on the model. SQL is only the input and the output format, never the thing being compared.</p>
+  <p>The reason is concrete: comparing raw SQL text can never distinguish a <em>rename</em> from a <em>delete plus add</em>. On a real database one of those preserves the column's data and the other destroys it. A structured model can tell them apart. Text cannot.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 860 330" class="wide" role="img" aria-label="Pipeline: SQL DDL is parsed into a schema model of tables, columns, constraints and indexes; the five engine packages diff, merge, validate and migrate operate on that model; ordered migration SQL comes out the other side.">
+      <defs>
+        <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="var(--neutral)"/>
+        </marker>
+        <marker id="a1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0L10 5L0 10z" fill="var(--accent)"/>
+        </marker>
+      </defs>
+
+      <!-- input -->
+      <rect x="14" y="52" width="168" height="116" rx="9" class="box-sunk"/>
+      <text class="t-disp t-muted" x="98" y="40" font-size="11.5" text-anchor="middle" letter-spacing="1">SQL IN</text>
+      <g class="t-mono" font-size="10.5" fill="var(--muted)">
+        <text x="30" y="78">CREATE TABLE users (</text>
+        <text x="30" y="95">  id   BIGSERIAL PK,</text>
+        <text x="30" y="112">  email VARCHAR(255)</text>
+        <text x="30" y="129">);</text>
+        <text x="30" y="152" class="t-faint">CREATE INDEX …</text>
+      </g>
+
+      <path d="M186 110 H246" class="arrow" marker-end="url(#a1)"/>
+      <text class="t-mono t-faint" x="216" y="100" font-size="10" text-anchor="middle">parse</text>
+
+      <!-- model -->
+      <rect x="250" y="30" width="330" height="160" rx="11" class="box-acc"/>
+      <text class="t-disp t-acc" x="415" y="55" font-size="13" text-anchor="middle" letter-spacing=".5">THE SCHEMA MODEL</text>
+      <text class="t-mono t-acc" x="415" y="72" font-size="10.5" text-anchor="middle" opacity=".85">this is the versioned thing</text>
+      <g>
+        <rect x="270" y="86" width="88" height="30" rx="6" class="box"/>
+        <rect x="366" y="86" width="88" height="30" rx="6" class="box"/>
+        <rect x="462" y="86" width="98" height="30" rx="6" class="box"/>
+        <rect x="270" y="124" width="136" height="30" rx="6" class="box"/>
+        <rect x="414" y="124" width="146" height="30" rx="6" class="box"/>
+      </g>
+      <g class="t-mono" font-size="11" text-anchor="middle" fill="var(--ink)">
+        <text x="314" y="105">tables</text>
+        <text x="410" y="105">columns</text>
+        <text x="511" y="105">types</text>
+        <text x="338" y="143">constraints</text>
+        <text x="487" y="143">indexes</text>
+      </g>
+      <text class="t-mono t-acc" x="415" y="177" font-size="10.5" text-anchor="middle">every object carries a stable id</text>
+
+      <path d="M584 110 H644" class="arrow" marker-end="url(#a1)"/>
+      <text class="t-mono t-faint" x="614" y="100" font-size="10" text-anchor="middle">emit</text>
+
+      <!-- output -->
+      <rect x="648" y="52" width="198" height="116" rx="9" class="box-sunk"/>
+      <text class="t-disp t-muted" x="747" y="40" font-size="11.5" text-anchor="middle" letter-spacing="1">SQL OUT</text>
+      <g class="t-mono" font-size="10.5">
+        <text x="664" y="78" fill="var(--add)">ALTER TABLE users</text>
+        <text x="664" y="95" fill="var(--add)">  RENAME email</text>
+        <text x="664" y="112" fill="var(--add)">  TO email_address;</text>
+        <text x="664" y="134" class="t-faint">ALTER TABLE … TYPE TEXT;</text>
+        <text x="664" y="152" class="t-faint">CREATE TABLE invoices …</text>
+      </g>
+
+      <!-- engine row -->
+      <path d="M415 194 V228" class="arrow-acc" marker-end="url(#a1a)"/>
+      <rect x="150" y="232" width="560" height="76" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="6 5"/>
+      <text class="t-disp t-acc" x="166" y="252" font-size="10.5" letter-spacing="1.1">ENGINE — PURE GO, NO HTTP, NO STORAGE</text>
+      <g>
+        <rect x="168" y="262" width="118" height="34" rx="7" class="box"/>
+        <rect x="298" y="262" width="118" height="34" rx="7" class="box"/>
+        <rect x="428" y="262" width="118" height="34" rx="7" class="box"/>
+        <rect x="558" y="262" width="136" height="34" rx="7" class="box"/>
+      </g>
+      <g class="t-mono" font-size="12" text-anchor="middle" fill="var(--ink)">
+        <text x="227" y="284">diff</text>
+        <text x="357" y="284">merge</text>
+        <text x="487" y="284">validate</text>
+        <text x="626" y="284">migrate</text>
+      </g>
+      <text class="t-mono t-faint" x="430" y="322" font-size="10.5" text-anchor="middle">all four read and write the model — never SQL text</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 01</span><span class="ftx">SQL is the doorway on both sides. The structured model in the middle is what gets committed, compared and merged.</span></figcaption>
+  </figure>
+</section>
+<section id="s3" class="key">
+  <span class="kicker">03 · the identity backbone</span>
+  <h2>Identity that survives renames</h2>
+  <p>Every table and every column carries a <strong>stable internal id</strong>. A rename is “same id, new name” — not “one thing deleted, another added.” Ids are assigned when a schema is imported and preserved by every edit made in the app. This single decision is what makes rename-aware diff and merge exact instead of guessed.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 330" class="wide" role="img" aria-label="Two ways of reading a rename. Without stable ids, a rename looks like a drop plus an add, which destroys the column's data. With stable ids, the same object simply has a new name, so the migration is an ALTER TABLE RENAME and the data is preserved.">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+        <marker id="a2d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--del)"/></marker>
+        <marker id="a2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--add)"/></marker>
+      </defs>
+
+      <text class="t-disp t-del" x="20" y="26" font-size="11.5" letter-spacing="1.1">TEXT COMPARISON — SEES TWO UNRELATED EVENTS</text>
+      <rect x="20" y="40" width="196" height="76" rx="9" class="box-sunk"/>
+      <text class="t-mono" x="38" y="66" font-size="11.5" fill="var(--ink)">users.email</text>
+      <text class="t-mono t-faint" x="38" y="86" font-size="10.5">VARCHAR(255)</text>
+      <text class="t-mono t-faint" x="38" y="104" font-size="10.5">40,912 rows of data</text>
+
+      <path d="M222 78 H272" class="arrow" stroke="var(--del)" marker-end="url(#a2d)"/>
+
+      <rect x="278" y="40" width="240" height="34" rx="7" class="box-del"/>
+      <text class="t-mono t-del" x="294" y="62" font-size="11.5">DROP COLUMN email</text>
+      <rect x="278" y="82" width="240" height="34" rx="7" class="box-del"/>
+      <text class="t-mono t-del" x="294" y="104" font-size="11.5">ADD COLUMN email_address</text>
+
+      <path d="M524 78 H570" class="arrow" stroke="var(--del)" marker-end="url(#a2d)"/>
+      <rect x="576" y="40" width="226" height="76" rx="9" class="box-del"/>
+      <text class="t-disp t-del" x="689" y="70" font-size="13" text-anchor="middle">data destroyed</text>
+      <text class="t-mono t-del" x="689" y="92" font-size="10.5" text-anchor="middle" opacity=".85">a silently wrong reading</text>
+
+      <line x1="20" y1="150" x2="800" y2="150" stroke="var(--line)" stroke-width="1" stroke-dasharray="4 4"/>
+
+      <text class="t-disp t-add" x="20" y="188" font-size="11.5" letter-spacing="1.1">STABLE IDS — SEES ONE OBJECT WITH A NEW NAME</text>
+      <rect x="20" y="202" width="196" height="86" rx="9" class="box-sunk"/>
+      <rect x="34" y="214" width="86" height="19" rx="5" class="box-acc"/>
+      <text class="t-mono t-acc" x="42" y="228" font-size="10">col#a3f1c7</text>
+      <text class="t-mono" x="38" y="252" font-size="11.5" fill="var(--ink)">email</text>
+      <text class="t-mono t-faint" x="38" y="272" font-size="10.5">VARCHAR(255)</text>
+
+      <path d="M222 245 H272" class="arrow" stroke="var(--add)" marker-end="url(#a2g)"/>
+      <text class="t-mono t-add" x="247" y="236" font-size="9.5" text-anchor="middle">same id</text>
+
+      <rect x="278" y="202" width="240" height="86" rx="9" class="box-sunk"/>
+      <rect x="292" y="214" width="86" height="19" rx="5" class="box-acc"/>
+      <text class="t-mono t-acc" x="300" y="228" font-size="10">col#a3f1c7</text>
+      <text class="t-mono" x="296" y="252" font-size="11.5" fill="var(--ink)">email_address</text>
+      <text class="t-mono t-faint" x="296" y="272" font-size="10.5">VARCHAR(255)</text>
+
+      <path d="M524 245 H570" class="arrow" stroke="var(--add)" marker-end="url(#a2g)"/>
+      <rect x="576" y="202" width="226" height="86" rx="9" class="box-add"/>
+      <text class="t-mono t-add" x="689" y="228" font-size="10.5" text-anchor="middle">ALTER TABLE users</text>
+      <text class="t-mono t-add" x="689" y="244" font-size="10.5" text-anchor="middle">RENAME email TO email_address</text>
+      <text class="t-disp t-add" x="689" y="270" font-size="12.5" text-anchor="middle">data preserved</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 02</span><span class="ftx">The same edit, read two ways. Only one of them keeps the column's data — which is why identity is tracked rather than inferred.</span></figcaption>
+  </figure>
+
+  <p>That covers edits made inside the app, where the operation itself is captured. Pasted DDL is the other case: there are no ids in the text, so a matcher scores candidate pairs on type, position, name similarity and constraint fingerprint. Confident matches are <em>proposed</em> as renames; anything ambiguous goes to a confirmation screen.</p>
+  <div class="note stop">
+    <p><span class="nlabel">The rule</span> — the system never silently invents identity. A wrong silent guess is a destructive interpretation, so an uncertain match becomes a question: <em>rename <code>email</code> → <code>email_address</code>, or drop and add?</em></p>
+  </div>
+</section>
+
+<section id="s4">
+  <span class="kicker">04 · the version graph</span>
+  <h2>Commits, branches, merge-base</h2>
+  <p>The shape is deliberately Git's, because every engineer already carries that mental model. A <strong>commit</strong> stores a whole schema snapshot and points at its parent. A <strong>branch</strong> is nothing but a named pointer at one commit. Commits belong to the project, not to a branch, so history is shared rather than copied.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 300" class="wide" role="img" aria-label="Commits stored as whole snapshots linked to their parents, with branch names shown as pointers attached to the newest commit on each line, and the merge-base marked at the point where the two lines split.">
+      <defs>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+      </defs>
+
+      <!-- feature lane -->
+      <g>
+        <rect x="330" y="30" width="132" height="64" rx="9" class="box"/>
+        <rect x="510" y="30" width="132" height="64" rx="9" class="box"/>
+      </g>
+      <!-- main lane -->
+      <g>
+        <rect x="30" y="180" width="132" height="64" rx="9" class="box"/>
+        <rect x="180" y="180" width="132" height="64" rx="9" class="box-acc"/>
+        <rect x="330" y="180" width="132" height="64" rx="9" class="box"/>
+      </g>
+
+      <g class="t-mono" font-size="11.5">
+        <text x="44" y="204" fill="var(--ink)" font-weight="500">c1</text>
+        <text x="194" y="204" class="t-acc" font-weight="500">c2</text>
+        <text x="344" y="204" fill="var(--ink)" font-weight="500">c3</text>
+        <text x="344" y="54" fill="var(--ink)" font-weight="500">f1</text>
+        <text x="524" y="54" fill="var(--ink)" font-weight="500">f2</text>
+      </g>
+      <g class="t-mono t-faint" font-size="9.5">
+        <text x="44" y="222">snapshot · 4 tables</text><text x="44" y="236">initial import</text>
+        <text x="194" y="222">snapshot · 4 tables</text><text x="194" y="236">add payments</text>
+        <text x="344" y="222">snapshot · 5 tables</text><text x="344" y="236">add refunds</text>
+        <text x="344" y="72">snapshot · 5 tables</text><text x="344" y="86">add invoices</text>
+        <text x="524" y="72">snapshot · 5 tables</text><text x="524" y="86">rename email</text>
+      </g>
+
+      <!-- parent links -->
+      <path d="M180 212 H168" class="arrow" marker-end="url(#a3)"/>
+      <path d="M330 212 H318" class="arrow" marker-end="url(#a3)"/>
+      <path d="M510 62 H468" class="arrow" marker-end="url(#a3)"/>
+      <path d="M330 62 C 276 62, 268 212, 318 212" class="arrow" stroke="var(--accent)" marker-end="url(#a3)"/>
+      <text class="t-mono t-faint" x="248" y="150" font-size="9.5" text-anchor="middle">parent</text>
+
+      <!-- branch pointers -->
+      <g>
+        <rect x="486" y="196" width="112" height="30" rx="15" class="box-sunk"/>
+        <text class="t-mono" x="542" y="216" font-size="11.5" text-anchor="middle" fill="var(--ink)">main</text>
+        <path d="M486 211 H472" class="arrow dash" marker-end="url(#a3)"/>
+        <rect x="672" y="47" width="130" height="30" rx="15" class="box-sunk"/>
+        <text class="t-mono t-acc" x="737" y="67" font-size="11.5" text-anchor="middle">feature/billing</text>
+        <path d="M672 62 H656" class="arrow dash" marker-end="url(#a3)"/>
+      </g>
+      <text class="t-mono t-faint" x="542" y="242" font-size="9.5" text-anchor="middle">a branch is just a pointer</text>
+
+      <!-- merge base marker -->
+      <path d="M246 254 V272" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 3" fill="none"/>
+      <text class="t-mono t-acc" x="246" y="288" font-size="11" text-anchor="middle" font-weight="500">merge-base for main ↔ feature/billing</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 03</span><span class="ftx">Snapshots are stored whole, not as deltas — schemas are kilobytes, and whole snapshots keep diff, merge and debugging simple.</span></figcaption>
+  </figure>
+
+  <p>Merging two branches starts by finding their merge-base: the newest commit both can reach. Once merge commits exist in the history, two branches can occasionally have more than one candidate ancestor — the criss-cross case. The system doesn't pretend otherwise; it picks the base by a deterministic, documented rule, so the same merge always sees the same ancestor and stays reproducible.</p>
+</section>
+
+<section id="s5">
+  <span class="kicker">05 · seeing what diverged</span>
+  <h2>Semantic diff</h2>
+  <p>A diff between any two refs — branches or commits — is computed on the model and reported in terms of meaning, not lines. Because ids are stable, a rename reads as a rename, and a rename plus a type change on the same column reads as one column with two changed properties.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 340" class="wide" role="img" aria-label="A diff panel comparing main with feature slash billing, listing each change with a gutter symbol, the affected object, and a plain-English description: an added table, an added column, a renamed column, a changed type, a dropped index, and a count of unchanged objects.">
+      <rect x="16" y="16" width="788" height="308" rx="12" class="box"/>
+      <path d="M16 62 H804" stroke="var(--line)" stroke-width="1.2"/>
+      <text class="t-mono" x="36" y="45" font-size="12" fill="var(--ink)" font-weight="500">main</text>
+      <text class="t-mono t-faint" x="82" y="45" font-size="12">↔</text>
+      <text class="t-mono t-acc" x="104" y="45" font-size="12" font-weight="500">feature/billing</text>
+      <text class="t-mono t-faint" x="788" y="45" font-size="11" text-anchor="end">5 changes · 12 objects untouched</text>
+
+      <g class="t-mono" font-size="11.5">
+        <!-- row 1 -->
+        <rect x="32" y="76" width="22" height="22" rx="5" class="box-add"/>
+        <text class="t-add" x="43" y="92" font-size="13" text-anchor="middle">+</text>
+        <text x="68" y="92" fill="var(--ink)">invoices</text>
+        <text class="t-faint" x="220" y="92">table</text>
+        <text class="t-muted" x="300" y="92">new table with 6 columns and a FK to orders</text>
+
+        <!-- row 2 -->
+        <rect x="32" y="124" width="22" height="22" rx="5" class="box-add"/>
+        <text class="t-add" x="43" y="140" font-size="13" text-anchor="middle">+</text>
+        <text x="68" y="140" fill="var(--ink)">orders.currency</text>
+        <text class="t-faint" x="220" y="140">column</text>
+        <text class="t-muted" x="300" y="140">added VARCHAR(3), NOT NULL, default 'INR'</text>
+
+        <!-- row 3 -->
+        <rect x="32" y="172" width="22" height="22" rx="5" class="box-acc"/>
+        <text class="t-acc" x="43" y="188" font-size="13" text-anchor="middle">~</text>
+        <text x="68" y="188" fill="var(--ink)">users.email</text>
+        <text class="t-faint" x="220" y="188">column</text>
+        <text class="t-muted" x="300" y="188">renamed to email_address</text>
+        <rect x="580" y="174" width="86" height="19" rx="5" class="box-acc"/>
+        <text class="t-acc" x="590" y="188" font-size="9.5">id preserved</text>
+
+        <!-- row 4 -->
+        <rect x="32" y="220" width="22" height="22" rx="5" class="box-acc"/>
+        <text class="t-acc" x="43" y="236" font-size="13" text-anchor="middle">~</text>
+        <text x="68" y="236" fill="var(--ink)">users.email_address</text>
+        <text class="t-faint" x="220" y="236">type</text>
+        <text class="t-muted" x="300" y="236">VARCHAR(255) → TEXT</text>
+
+        <!-- row 5 -->
+        <rect x="32" y="268" width="22" height="22" rx="5" class="box-del"/>
+        <text class="t-del" x="43" y="284" font-size="13" text-anchor="middle">−</text>
+        <text x="68" y="284" fill="var(--ink)">idx_orders_status</text>
+        <text class="t-faint" x="220" y="284">index</text>
+        <text class="t-muted" x="300" y="284">dropped</text>
+      </g>
+      <g stroke="var(--hair)" stroke-width="1">
+        <line x1="32" y1="110" x2="788" y2="110"/>
+        <line x1="32" y1="158" x2="788" y2="158"/>
+        <line x1="32" y1="206" x2="788" y2="206"/>
+        <line x1="32" y1="254" x2="788" y2="254"/>
+      </g>
+      <text class="t-mono t-faint" x="32" y="312" font-size="10.5">every row is one semantic change — not one line of text</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 04</span><span class="ftx">The diff answers “what did this side actually do?” — which is exactly the input the merge needs.</span></figcaption>
+  </figure>
+</section>
+<section id="s6" class="key">
+  <span class="kicker">06 · the hard part</span>
+  <h2>Three-way merge</h2>
+  <p>A two-way comparison can only say <em>how the two sides differ now</em>. A three-way merge also reads the merge-base, so it knows <em>what each side actually changed</em>. That difference is what separates “only one side touched this, apply it” from “both touched it, ask the human.”</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 400" class="wide" role="img" aria-label="A three-way merge: the base version of the users.email column at the top, the ours branch changing its type, the theirs branch renaming it and adding a unique constraint, and the merged result combining both because they touched different properties.">
+      <defs>
+        <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+        <marker id="a4a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+      </defs>
+
+      <!-- base -->
+      <rect x="300" y="16" width="220" height="84" rx="10" class="box-sunk"/>
+      <text class="t-disp t-muted" x="410" y="40" font-size="11.5" text-anchor="middle" letter-spacing="1">BASE · COMMON ANCESTOR</text>
+      <text class="t-mono" x="410" y="62" font-size="12" text-anchor="middle" fill="var(--ink)">users.email</text>
+      <text class="t-mono t-faint" x="410" y="82" font-size="11" text-anchor="middle">VARCHAR(255) · nullable · no unique</text>
+
+      <path d="M330 104 C 250 130, 200 130, 168 156" class="arrow" marker-end="url(#a4)"/>
+      <path d="M490 104 C 570 130, 620 130, 652 156" class="arrow" marker-end="url(#a4)"/>
+      <text class="t-mono t-faint" x="196" y="130" font-size="10" text-anchor="middle">what ours changed</text>
+      <text class="t-mono t-faint" x="628" y="130" font-size="10" text-anchor="middle">what theirs changed</text>
+
+      <!-- ours -->
+      <rect x="24" y="160" width="264" height="104" rx="10" class="box"/>
+      <text class="t-disp t-muted" x="42" y="184" font-size="11.5" letter-spacing="1">OURS · main</text>
+      <rect x="42" y="196" width="228" height="26" rx="6" class="box-acc"/>
+      <text class="t-mono t-acc" x="54" y="214" font-size="11">type: VARCHAR(255) → TEXT</text>
+      <text class="t-mono t-faint" x="54" y="240" font-size="10.5">name untouched</text>
+      <text class="t-mono t-faint" x="54" y="256" font-size="10.5">constraints untouched</text>
+
+      <!-- theirs -->
+      <rect x="532" y="160" width="264" height="104" rx="10" class="box"/>
+      <text class="t-disp t-muted" x="550" y="184" font-size="11.5" letter-spacing="1">THEIRS · feature/billing</text>
+      <rect x="550" y="196" width="228" height="26" rx="6" class="box-acc"/>
+      <text class="t-mono t-acc" x="562" y="214" font-size="11">name: email → email_address</text>
+      <rect x="550" y="228" width="228" height="26" rx="6" class="box-acc"/>
+      <text class="t-mono t-acc" x="562" y="246" font-size="11">+ UNIQUE constraint</text>
+
+      <!-- overlap check -->
+      <rect x="306" y="186" width="208" height="52" rx="10" class="box-sunk"/>
+      <text class="t-mono t-muted" x="410" y="208" font-size="10.5" text-anchor="middle">compared per property</text>
+      <text class="t-disp t-add" x="410" y="226" font-size="12" text-anchor="middle">no property overlaps</text>
+
+      <path d="M156 268 C 220 300, 270 300, 300 314" class="arrow-acc" marker-end="url(#a4a)"/>
+      <path d="M664 268 C 600 300, 550 300, 520 314" class="arrow-acc" marker-end="url(#a4a)"/>
+
+      <!-- merged -->
+      <rect x="286" y="308" width="248" height="80" rx="10" class="box-acc"/>
+      <text class="t-disp t-acc" x="410" y="332" font-size="12" text-anchor="middle" letter-spacing="1">MERGED — CLEAN</text>
+      <text class="t-mono" x="410" y="354" font-size="12" text-anchor="middle" fill="var(--ink)">users.email_address</text>
+      <text class="t-mono t-acc" x="410" y="374" font-size="11" text-anchor="middle">TEXT · UNIQUE</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 05</span><span class="ftx">Both sides changed the same column and it still merges cleanly, because they changed different properties of it. Not every difference is a conflict.</span></figcaption>
+  </figure>
+
+  <p>The comparison runs per <em>property</em> of every object — name, type, nullability, default, each constraint, each index — rather than per object. For each property the rule is the same five-case table:</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 760 316" class="med" role="img" aria-label="The merge rule as a five-row table. When base, ours and theirs agree the value is kept. When only one side changed it, that change is taken. When both made the same change it is taken once. When both changed it to different values, it is a conflict for the user to resolve.">
+      <defs>
+        <marker id="a9" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+      </defs>
+      <text class="t-disp t-faint" x="26" y="26" font-size="10.5" letter-spacing="1.2">BASE</text>
+      <text class="t-disp t-faint" x="150" y="26" font-size="10.5" letter-spacing="1.2">OURS</text>
+      <text class="t-disp t-faint" x="274" y="26" font-size="10.5" letter-spacing="1.2">THEIRS</text>
+      <text class="t-disp t-faint" x="420" y="26" font-size="10.5" letter-spacing="1.2">RESULT</text>
+      <line x1="20" y1="36" x2="740" y2="36" stroke="var(--ink)" stroke-width="1.4"/>
+
+      <g class="t-mono" font-size="12.5" text-anchor="middle" font-weight="500">
+        <!-- row1 -->
+        <rect x="20" y="50" width="52" height="30" rx="7" class="box-sunk"/><text x="46" y="70" fill="var(--muted)">A</text>
+        <rect x="144" y="50" width="52" height="30" rx="7" class="box-sunk"/><text x="170" y="70" fill="var(--muted)">A</text>
+        <rect x="268" y="50" width="52" height="30" rx="7" class="box-sunk"/><text x="294" y="70" fill="var(--muted)">A</text>
+        <!-- row2 -->
+        <rect x="20" y="98" width="52" height="30" rx="7" class="box-sunk"/><text x="46" y="118" fill="var(--muted)">A</text>
+        <rect x="144" y="98" width="52" height="30" rx="7" class="box-acc"/><text x="170" y="118" class="t-acc">B</text>
+        <rect x="268" y="98" width="52" height="30" rx="7" class="box-sunk"/><text x="294" y="118" fill="var(--muted)">A</text>
+        <!-- row3 -->
+        <rect x="20" y="146" width="52" height="30" rx="7" class="box-sunk"/><text x="46" y="166" fill="var(--muted)">A</text>
+        <rect x="144" y="146" width="52" height="30" rx="7" class="box-sunk"/><text x="170" y="166" fill="var(--muted)">A</text>
+        <rect x="268" y="146" width="52" height="30" rx="7" class="box-acc"/><text x="294" y="166" class="t-acc">B</text>
+        <!-- row4 -->
+        <rect x="20" y="194" width="52" height="30" rx="7" class="box-sunk"/><text x="46" y="214" fill="var(--muted)">A</text>
+        <rect x="144" y="194" width="52" height="30" rx="7" class="box-acc"/><text x="170" y="214" class="t-acc">B</text>
+        <rect x="268" y="194" width="52" height="30" rx="7" class="box-acc"/><text x="294" y="214" class="t-acc">B</text>
+        <!-- row5 -->
+        <rect x="20" y="242" width="52" height="30" rx="7" class="box-sunk"/><text x="46" y="262" fill="var(--muted)">A</text>
+        <rect x="144" y="242" width="52" height="30" rx="7" class="box-acc"/><text x="170" y="262" class="t-acc">B</text>
+        <rect x="268" y="242" width="52" height="30" rx="7" class="box-del"/><text x="294" y="262" class="t-del">C</text>
+      </g>
+
+      <g class="arrow"><path d="M330 65 H392" marker-end="url(#a9)"/><path d="M330 113 H392" marker-end="url(#a9)"/><path d="M330 161 H392" marker-end="url(#a9)"/><path d="M330 209 H392" marker-end="url(#a9)"/><path d="M330 257 H392" marker-end="url(#a9)"/></g>
+
+      <g class="t-mono" font-size="11.5">
+        <circle cx="410" cy="65" r="4" fill="var(--add)"/><text x="426" y="70" fill="var(--ink)">keep A</text><text class="t-faint" x="510" y="70" font-size="10.5">nobody touched it</text>
+        <circle cx="410" cy="113" r="4" fill="var(--add)"/><text x="426" y="118" fill="var(--ink)">take B</text><text class="t-faint" x="510" y="118" font-size="10.5">only ours changed it</text>
+        <circle cx="410" cy="161" r="4" fill="var(--add)"/><text x="426" y="166" fill="var(--ink)">take B</text><text class="t-faint" x="510" y="166" font-size="10.5">only theirs changed it</text>
+        <circle cx="410" cy="209" r="4" fill="var(--add)"/><text x="426" y="214" fill="var(--ink)">take B</text><text class="t-faint" x="510" y="214" font-size="10.5">both made the same change</text>
+        <circle cx="410" cy="257" r="4" fill="var(--del)"/><text x="426" y="262" class="t-del" font-weight="500">CONFLICT</text><text class="t-faint" x="510" y="262" font-size="10.5">both changed it differently</text>
+      </g>
+      <line x1="20" y1="286" x2="740" y2="286" stroke="var(--line)" stroke-width="1"/>
+      <text class="t-mono t-faint" x="20" y="306" font-size="10.5">four of five cases resolve without a human · only the fifth stops the merge</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 06</span><span class="ftx">The whole merge algebra. Everything else in the merge engine is bookkeeping around these five rows.</span></figcaption>
+  </figure>
+</section>
+
+<section id="s7">
+  <span class="kicker">07 · the taxonomy</span>
+  <h2>The eight conflict kinds</h2>
+  <p>Conflicts are specified up front rather than discovered as they show up, and each class gets two tests: one case that <em>must</em> conflict, and one adjacent case that <em>must</em> merge cleanly.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 330" class="wide" role="img" aria-label="Eight conflict classes: rename versus rename, retype versus retype, delete versus modify, add versus add, constraint divergence, index divergence, default and nullability divergence, and cross-object conflicts where each branch is valid alone but the combination is broken.">
+      <g>
+        <rect x="14" y="30" width="190" height="116" rx="10" class="box"/>
+        <rect x="216" y="30" width="190" height="116" rx="10" class="box"/>
+        <rect x="418" y="30" width="190" height="116" rx="10" class="box"/>
+        <rect x="620" y="30" width="190" height="116" rx="10" class="box"/>
+        <rect x="14" y="162" width="190" height="116" rx="10" class="box"/>
+        <rect x="216" y="162" width="190" height="116" rx="10" class="box"/>
+        <rect x="418" y="162" width="190" height="116" rx="10" class="box"/>
+        <rect x="620" y="162" width="190" height="116" rx="10" class="box-warn"/>
+      </g>
+      <text class="t-disp t-faint" x="14" y="20" font-size="10.5" letter-spacing="1.2">SAME PROPERTY, TWO ANSWERS — CAUGHT BY THE MERGE</text>
+      <text class="t-disp t-warn" x="620" y="20" font-size="10.5" letter-spacing="1.2">CAUGHT BY VALIDATION</text>
+
+      <g class="t-mono" font-size="10.5" font-weight="500">
+        <text class="t-acc" x="28" y="52">C1</text><text class="t-acc" x="230" y="52">C2</text><text class="t-acc" x="432" y="52">C3</text><text class="t-acc" x="634" y="52">C4</text>
+        <text class="t-acc" x="28" y="184">C5</text><text class="t-acc" x="230" y="184">C6</text><text class="t-acc" x="432" y="184">C7</text><text class="t-warn" x="634" y="184">C8</text>
+      </g>
+      <g class="t-disp" font-size="12" fill="var(--ink)">
+        <text x="58" y="52">rename ↔ rename</text>
+        <text x="260" y="52">retype ↔ retype</text>
+        <text x="462" y="52">delete ↔ modify</text>
+        <text x="664" y="52">add ↔ add</text>
+        <text x="58" y="184">constraints</text>
+        <text x="260" y="184">indexes</text>
+        <text x="462" y="184">default / null</text>
+        <text x="664" y="184" fill="var(--warn)">cross-object</text>
+      </g>
+      <g class="t-mono t-muted" font-size="10">
+        <text x="28" y="78">ours  email → email_address</text>
+        <text x="28" y="94">theirs email → contact_email</text>
+        <text class="t-faint" x="28" y="122">one column, two new names —</text>
+        <text class="t-faint" x="28" y="136">only a person can pick</text>
+
+        <text x="230" y="78">ours   → TEXT</text>
+        <text x="230" y="94">theirs → VARCHAR(500)</text>
+        <text class="t-faint" x="230" y="122">base VARCHAR(255); both</text>
+        <text class="t-faint" x="230" y="136">widened it, differently</text>
+
+        <text x="432" y="78">ours  DROP users.email</text>
+        <text x="432" y="94">theirs retype users.email</text>
+        <text class="t-faint" x="432" y="122">keeping the change means</text>
+        <text class="t-faint" x="432" y="136">un-dropping the column</text>
+
+        <text x="634" y="78">ours  + status VARCHAR(20)</text>
+        <text x="634" y="94">theirs + status INT NOT NULL</text>
+        <text class="t-faint" x="634" y="122">same name, different ids —</text>
+        <text class="t-faint" x="634" y="136">two columns cannot both land</text>
+
+        <text x="28" y="210">ours  PK (id)</text>
+        <text x="28" y="226">theirs PK (id, tenant_id)</text>
+        <text class="t-faint" x="28" y="254">a table has exactly one</text>
+        <text class="t-faint" x="28" y="268">primary key</text>
+
+        <text x="230" y="210">ours   idx_status(status)</text>
+        <text x="230" y="226">theirs idx_status(created)</text>
+        <text class="t-faint" x="230" y="254">two definitions claiming</text>
+        <text class="t-faint" x="230" y="268">one index name</text>
+
+        <text x="432" y="210">ours  SET NOT NULL</text>
+        <text x="432" y="226">theirs DEFAULT NULL</text>
+        <text class="t-faint" x="432" y="254">the two settings contradict</text>
+        <text class="t-faint" x="432" y="268">each other on one column</text>
+
+        <text x="634" y="210" fill="var(--warn)">ours  DROP TABLE users</text>
+        <text x="634" y="226" fill="var(--warn)">theirs + FK orders→users</text>
+        <text class="t-faint" x="634" y="254">no single property clashes —</text>
+        <text class="t-faint" x="634" y="268">the combination is invalid</text>
+      </g>
+      <text class="t-mono t-faint" x="14" y="308" font-size="10.5">C1–C7 are found by comparing properties · C8 can only be found by inspecting the whole merged schema</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 07</span><span class="ftx">Seven classes are property-level disagreements. The eighth is a different animal, and it's the reason merging isn't the last step.</span></figcaption>
+  </figure>
+
+  <p>When the merge stops, the resolution screen shows base, ours and theirs side by side for each conflict and asks the user to choose. Nothing is auto-picked on their behalf.</p>
+</section>
+
+<section id="s8" class="key">
+  <span class="kicker">08 · after the merge</span>
+  <h2>Validation, because a clean merge can still be wrong</h2>
+  <p>Conflict detection finds where the branches <em>disagree</em>. Validation finds where their <em>agreement</em> is still broken. Each branch below is perfectly valid on its own; the combination is not.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 330" class="wide" role="img" aria-label="Ours drops the users table while theirs adds a foreign key from orders to users. Neither change conflicts with the other at the property level, but the merged schema contains a foreign key pointing at a table that no longer exists, so validation blocks the merge.">
+      <defs>
+        <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+        <marker id="a5d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--del)"/></marker>
+      </defs>
+
+      <rect x="20" y="28" width="352" height="112" rx="10" class="box"/>
+      <text class="t-disp t-muted" x="38" y="52" font-size="11.5" letter-spacing="1">OURS · main — valid alone</text>
+      <rect x="38" y="64" width="150" height="58" rx="8" class="box-del"/>
+      <text class="t-mono t-del" x="52" y="86" font-size="11.5" font-weight="500">users</text>
+      <text class="t-mono t-del" x="52" y="104" font-size="10.5">DROP TABLE</text>
+      <line x1="46" y1="80" x2="90" y2="80" stroke="var(--del)" stroke-width="1.4"/>
+      <text class="t-mono t-faint" x="206" y="86" font-size="10.5">the table is retired;</text>
+      <text class="t-mono t-faint" x="206" y="102" font-size="10.5">nothing here points at it</text>
+
+      <rect x="448" y="28" width="352" height="112" rx="10" class="box"/>
+      <text class="t-disp t-muted" x="466" y="52" font-size="11.5" letter-spacing="1">THEIRS · feature — valid alone</text>
+      <rect x="466" y="64" width="170" height="58" rx="8" class="box-add"/>
+      <text class="t-mono t-add" x="480" y="86" font-size="11.5" font-weight="500">orders.user_id</text>
+      <text class="t-mono t-add" x="480" y="104" font-size="10.5">+ FK → users.id</text>
+      <text class="t-mono t-faint" x="654" y="86" font-size="10.5">users still exists</text>
+      <text class="t-mono t-faint" x="654" y="102" font-size="10.5">on this branch</text>
+
+      <path d="M196 144 C 196 176, 300 172, 330 190" class="arrow" marker-end="url(#a5)"/>
+      <path d="M624 144 C 624 176, 520 172, 490 190" class="arrow" marker-end="url(#a5)"/>
+      <text class="t-mono t-add" x="410" y="172" font-size="10.5" text-anchor="middle">merge finds no property conflict</text>
+
+      <rect x="150" y="194" width="520" height="96" rx="10" class="box-del"/>
+      <text class="t-disp t-del" x="170" y="218" font-size="11.5" letter-spacing="1">MERGED SCHEMA — INCOHERENT</text>
+      <rect x="170" y="230" width="170" height="44" rx="8" class="box"/>
+      <text class="t-mono" x="184" y="248" font-size="11.5" fill="var(--ink)">orders.user_id</text>
+      <text class="t-mono t-faint" x="184" y="264" font-size="10">FK expects users.id</text>
+      <path d="M346 252 H432" class="arrow" stroke="var(--del)" marker-end="url(#a5d)"/>
+      <rect x="438" y="230" width="170" height="44" rx="8" fill="none" stroke="var(--del)" stroke-width="1.4" stroke-dasharray="5 4"/>
+      <text class="t-mono t-del" x="523" y="248" font-size="11.5" text-anchor="middle">users</text>
+      <text class="t-mono t-del" x="523" y="264" font-size="10" text-anchor="middle">does not exist</text>
+      <text class="t-mono t-del" x="389" y="243" font-size="10" text-anchor="middle">dangling FK</text>
+
+      <text class="t-mono t-warn" x="410" y="316" font-size="11.5" text-anchor="middle" font-weight="500">validation runs before the commit lands — the merge is blocked, not saved and repaired later</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 08</span><span class="ftx">The validation pass walks the whole merged schema graph: every FK resolves, every constraint and index references live columns, no duplicate names anywhere.</span></figcaption>
+  </figure>
+
+  <div class="note good">
+    <p><span class="nlabel">Ordering</span> — merge, then validate, then commit. A merge only produces a commit if the merged schema passes the full validation pass, so no branch head ever points at a broken schema.</p>
+  </div>
+</section>
+<section id="s9">
+  <span class="kicker">09 · the output</span>
+  <h2>The migration script</h2>
+  <p>From any two versions the engine emits ordered DDL. Order is not cosmetic — a script that adds a foreign key before its target table exists simply fails. Dependency ordering is the direct payoff of everything above it.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 340" class="wide" role="img" aria-label="The same set of changes shown twice: first in the arbitrary order they were made, which fails to run, then reordered by dependency so that constraints are dropped before their tables, referenced tables are created before the keys that point at them, and a rename is emitted as an ALTER TABLE RENAME rather than a drop and an add.">
+      <defs>
+        <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+      </defs>
+
+      <rect x="14" y="26" width="352" height="270" rx="10" class="box"/>
+      <text class="t-disp t-del" x="32" y="50" font-size="11.5" letter-spacing="1">CHANGES AS RECORDED — WOULD FAIL</text>
+      <g class="t-mono" font-size="10.5">
+        <text class="t-muted" x="32" y="80">ALTER TABLE orders ADD FK → invoices</text>
+        <text class="t-del" x="330" y="80" text-anchor="end">✕</text>
+        <text class="t-muted" x="32" y="112">CREATE TABLE invoices</text>
+        <text class="t-muted" x="32" y="144">DROP TABLE refunds</text>
+        <text class="t-del" x="330" y="144" text-anchor="end">✕</text>
+        <text class="t-muted" x="32" y="176">ALTER TABLE refunds DROP CONSTRAINT</text>
+        <text class="t-muted" x="32" y="208">DROP COLUMN email</text>
+        <text class="t-del" x="330" y="208" text-anchor="end">✕</text>
+        <text class="t-muted" x="32" y="240">ADD COLUMN email_address</text>
+      </g>
+      <text class="t-mono t-del" x="32" y="274" font-size="10.5">FK before its table · table before its constraint ·</text>
+      <text class="t-mono t-del" x="32" y="288" font-size="10.5">a rename torn into two data-losing statements</text>
+
+      <path d="M374 160 H424" class="arrow-acc" marker-end="url(#a6)"/>
+      <text class="t-mono t-acc" x="399" y="150" font-size="9.5" text-anchor="middle">sort</text>
+
+      <rect x="434" y="26" width="372" height="270" rx="10" class="box-acc"/>
+      <text class="t-disp t-add" x="452" y="50" font-size="11.5" letter-spacing="1">EMITTED SCRIPT — RUNS TOP TO BOTTOM</text>
+      <g class="t-mono" font-size="10.5">
+        <text class="t-faint" x="452" y="80">1</text><text x="470" y="80" fill="var(--ink)">ALTER TABLE refunds DROP CONSTRAINT …</text>
+        <text class="t-faint" x="452" y="112">2</text><text x="470" y="112" fill="var(--ink)">DROP TABLE refunds</text>
+        <text class="t-faint" x="452" y="144">3</text><text x="470" y="144" fill="var(--ink)">CREATE TABLE invoices ( … )</text>
+        <text class="t-faint" x="452" y="176">4</text><text x="470" y="176" fill="var(--ink)">ALTER TABLE orders ADD CONSTRAINT …</text>
+        <text class="t-faint" x="452" y="208">5</text><text class="t-add" x="470" y="208">ALTER TABLE users</text>
+        <text class="t-add" x="470" y="224">  RENAME email TO email_address;</text>
+      </g>
+      <g class="t-mono t-faint" font-size="9.5">
+        <text x="470" y="94">constraints leave before their table</text>
+        <text x="470" y="158">referenced table exists before the key</text>
+        <text x="470" y="244">one statement — the data stays</text>
+      </g>
+      <text class="t-mono t-add" x="452" y="278" font-size="10.5">apply(migration(A → B), A) ≡ B — asserted in tests</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 09</span><span class="ftx">Drops are ordered inward-out, creates outward-in, and renames stay renames — the one place identity tracking pays for itself in data, not just in tidy output.</span></figcaption>
+  </figure>
+
+  <div class="note stop">
+    <p><span class="nlabel">A deliberate boundary</span> — the script is generated and handed over to view, copy or download. Mergebase never connects to a database and runs it. Execution means credentials, transactions, rollback and production safety: a different product, and none of it is needed to demonstrate this one.</p>
+  </div>
+</section>
+
+<section id="s10">
+  <span class="kicker">10 · the machinery</span>
+  <h2>How a click travels through the system</h2>
+  <p>One container, one state file, no external services. The engine is five plain Go packages that know nothing about HTTP, React or SQLite — which is what makes them readable and exhaustively testable. The API layer above them stays thin on purpose: it translates JSON into engine calls and back, and every error comes out as <code>{code, message, hint}</code> with a hint the user can act on.</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 400" class="wide" role="img" aria-label="Architecture: a React browser UI sends JSON over HTTPS to a thin Go API layer running inside a single Docker container. The API calls five pure engine packages — parser, diff, merge, validate, migrate — and stores schema snapshots as JSON in one SQLite file.">
+      <defs>
+        <marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+      </defs>
+
+      <rect x="290" y="14" width="240" height="52" rx="9" class="box"/>
+      <text class="t-disp" x="410" y="38" font-size="12.5" text-anchor="middle" fill="var(--ink)">Browser · React UI</text>
+      <text class="t-mono t-faint" x="410" y="55" font-size="10.5" text-anchor="middle">five screens</text>
+
+      <path d="M410 68 V112" class="arrow" marker-end="url(#a7)"/>
+      <text class="t-mono t-faint" x="424" y="94" font-size="10">JSON over HTTPS</text>
+
+      <rect x="24" y="118" width="772" height="266" rx="12" fill="none" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="6 5"/>
+      <text class="t-mono t-faint" x="40" y="140" font-size="10">one Docker container — the only deployed thing · config is PORT + DATABASE_PATH</text>
+
+      <rect x="290" y="152" width="240" height="52" rx="9" class="box"/>
+      <text class="t-disp" x="410" y="176" font-size="12.5" text-anchor="middle" fill="var(--ink)">Go HTTP server</text>
+      <text class="t-mono t-faint" x="410" y="193" font-size="10.5" text-anchor="middle">thin JSON layer</text>
+
+      <path d="M410 206 V238" class="arrow" marker-end="url(#a7)"/>
+      <text class="t-mono t-faint" x="424" y="226" font-size="10">plain function calls</text>
+
+      <rect x="48" y="242" width="724" height="82" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.8"/>
+      <text class="t-disp t-acc" x="64" y="260" font-size="10.5" letter-spacing="1.1">ENGINE — PURE PACKAGES · NO HTTP · NO STORAGE · FULLY UNIT-TESTABLE</text>
+      <g>
+        <rect x="64" y="270" width="132" height="40" rx="7" class="box"/>
+        <rect x="208" y="270" width="132" height="40" rx="7" class="box"/>
+        <rect x="352" y="270" width="132" height="40" rx="7" class="box"/>
+        <rect x="496" y="270" width="132" height="40" rx="7" class="box"/>
+        <rect x="640" y="270" width="116" height="40" rx="7" class="box"/>
+      </g>
+      <g class="t-mono" font-size="12" text-anchor="middle" fill="var(--ink)">
+        <text x="130" y="295">parser</text><text x="274" y="295">diff</text><text x="418" y="295">merge</text><text x="562" y="295">validate</text><text x="698" y="295">migrate</text>
+      </g>
+
+      <path d="M410 326 V352" class="arrow" marker-end="url(#a7)"/>
+      <text class="t-mono t-faint" x="424" y="344" font-size="10">schema snapshots as JSON</text>
+
+      <rect x="290" y="332" width="240" height="44" rx="9" class="box-sunk"/>
+      <text class="t-mono" x="410" y="352" font-size="11.5" text-anchor="middle" fill="var(--ink)">SQLite — one file</text>
+      <text class="t-mono t-faint" x="410" y="368" font-size="10" text-anchor="middle">projects · commits · branches · events</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 10</span><span class="ftx">Nothing here can be “down” while a reviewer is clicking. The accented band is where the interesting code lives.</span></figcaption>
+  </figure>
+
+  <p>Here is the same architecture from the other side — what actually happens between pressing <strong>Merge</strong> and seeing a merge commit:</p>
+
+  <figure>
+    <div class="scrollx">
+    <svg viewBox="0 0 820 420" class="wide" role="img" aria-label="A step by step trace of a merge: the UI requests a preview, the API loads the base, ours and theirs snapshots from SQLite, the engine computes the merge and returns clean changes plus one conflict, the UI shows the conflict, the user resolves it, the engine re-merges and validates, the API writes a merge commit with two parents and moves the branch head, and the UI shows the result with a generated migration.">
+      <defs>
+        <marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--neutral)"/></marker>
+        <marker id="a8a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--accent)"/></marker>
+      </defs>
+
+      <g>
+        <rect x="26" y="16" width="128" height="34" rx="8" class="box"/>
+        <rect x="246" y="16" width="128" height="34" rx="8" class="box"/>
+        <rect x="466" y="16" width="128" height="34" rx="8" class="box-acc"/>
+        <rect x="672" y="16" width="128" height="34" rx="8" class="box-sunk"/>
+      </g>
+      <g class="t-mono" font-size="11.5" text-anchor="middle">
+        <text x="90" y="38" fill="var(--ink)">React UI</text>
+        <text x="310" y="38" fill="var(--ink)">API layer</text>
+        <text x="530" y="38" class="t-acc">engine</text>
+        <text x="736" y="38" fill="var(--ink)">SQLite</text>
+      </g>
+      <g stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 5">
+        <line x1="90" y1="54" x2="90" y2="392"/>
+        <line x1="310" y1="54" x2="310" y2="392"/>
+        <line x1="530" y1="54" x2="530" y2="392"/>
+        <line x1="736" y1="54" x2="736" y2="392"/>
+      </g>
+
+      <g class="arrow">
+        <path d="M92 86 H304" marker-end="url(#a8)"/>
+        <path d="M312 122 H730" marker-end="url(#a8)"/>
+        <path d="M730 158 H316" marker-end="url(#a8)"/>
+        <path d="M312 194 H524" marker-end="url(#a8a)" stroke="var(--accent)"/>
+        <path d="M524 230 H316" marker-end="url(#a8a)" stroke="var(--accent)"/>
+        <path d="M304 266 H96" marker-end="url(#a8)"/>
+        <path d="M92 302 H304" marker-end="url(#a8)"/>
+        <path d="M312 338 H524" marker-end="url(#a8a)" stroke="var(--accent)"/>
+        <path d="M312 374 H730" marker-end="url(#a8)"/>
+      </g>
+
+      <g class="t-mono" font-size="10.5">
+        <text class="t-faint" x="98" y="78">1</text><text x="112" y="78" fill="var(--ink)">POST /api/merge/preview {source, target}</text>
+        <text class="t-faint" x="318" y="114">2</text><text class="t-muted" x="332" y="114">find merge-base, load base / ours / theirs snapshots</text>
+        <text class="t-faint" x="332" y="150">3</text><text class="t-muted" x="346" y="150">three whole schema JSON blobs come back</text>
+        <text class="t-faint" x="318" y="186">4</text><text class="t-acc" x="332" y="186">merge(base, ours, theirs) — per property</text>
+        <text class="t-faint" x="332" y="222">5</text><text class="t-acc" x="346" y="222">7 changes combine cleanly · 1 conflict on users.email</text>
+        <text class="t-faint" x="112" y="258">6</text><text x="126" y="258" fill="var(--ink)">preview renders base / ours / theirs side by side</text>
+        <text class="t-faint" x="98" y="294">7</text><text x="112" y="294" fill="var(--ink)">POST /api/merge {resolutions[]} — the user chose</text>
+        <text class="t-faint" x="318" y="330">8</text><text class="t-acc" x="332" y="330">re-merge with resolutions, then validate the whole schema</text>
+        <text class="t-faint" x="318" y="366">9</text><text class="t-muted" x="332" y="366">write merge commit (two parents), move the branch head</text>
+      </g>
+      <text class="t-mono t-warn" x="26" y="412" font-size="10.5">if step 8 fails validation nothing is written — the API answers 409 with the reason, and the branch head never moves</text>
+    </svg>
+    </div>
+    <figcaption><span class="fno">Fig. 11</span><span class="ftx">Two round trips: one to see the damage, one to commit the decision. The engine is called twice and stores nothing between calls.</span></figcaption>
+  </figure>
+
+  <pre><code>POST /api/projects                       create (optional DDL → first commit)
+GET  /api/projects/{id}/branches         POST …/branches {name, from}
+GET  /api/branches/{id}/schema           head snapshot
+GET  /api/branches/{id}/commits          history
+POST /api/branches/{id}/changes          {operations[], message} → new commit
+POST /api/branches/{id}/import           {ddl} → rename-match report → confirm → commit
+GET  /api/diff?project=&amp;from=&amp;to=        semantic diff
+POST /api/merge/preview                  {source, target} → {clean, conflicts, warnings}
+POST /api/merge                          {source, target, resolutions[]} → merge commit
+GET  /api/migration?project=&amp;from=&amp;to=   ordered SQL text
+POST /api/demo/reset                     restore the seeded workspace</code></pre>
+</section>
+
+<section id="s11">
+  <span class="kicker">11 · the flow as a person meets it</span>
+  <h2>The three-minute walkthrough</h2>
+  <p>Everything above exists to make this sequence work on the deployed URL, with no setup and no instructions:</p>
+  <ol class="steps">
+    <li><strong>Land on a real project.</strong> A payments schema is already there — <code>users</code>, <code>orders</code>, <code>invoices</code>, <code>payments</code> — with <code>main</code> and two feature branches already diverged.</li>
+    <li><strong>Browse the schema.</strong> Table cards show columns, types and badges for keys, constraints and indexes.</li>
+    <li><strong>Open the diff.</strong> <code>main</code> against <code>feature/billing</code>, written as sentences rather than line noise (Fig. 04).</li>
+    <li><strong>Press Merge.</strong> Most changes combine on their own. One prepared conflict stops it: both branches changed the same column's type.</li>
+    <li><strong>Resolve it.</strong> Base, ours and theirs side by side; one click. Validation then confirms no dangling foreign keys, no orphaned indexes, no duplicate names.</li>
+    <li><strong>Read the result.</strong> A merge commit in the history, and an ordered migration script to copy or download (Fig. 09).</li>
+    <li><strong>Try to break it.</strong> Paste your own DDL, make your own branches — then press <strong>Reset demo</strong> to put the seeded state back for the next person.</li>
+  </ol>
+  <p>Every operation the brief names is clickable, not just pre-seeded: add, drop, rename and retype columns; change constraints and indexes; create and drop tables.</p>
+</section>
+
+<section id="s12">
+  <span class="kicker">12 · the contract</span>
+  <h2>What the system promises</h2>
+  <p>Six properties the test suite exists to enforce. They hold at every point in the flow above.</p>
+  <div class="inv">
+    <div><b>immutability</b><span>A commit's schema snapshot never changes. History is appended, never rewritten.</span></div>
+    <div><b>reachability</b><span>A branch head always points at a commit that exists.</span></div>
+    <div><b>determinism</b><span>The merge-base is chosen by a fixed rule — the same merge always sees the same ancestor.</span></div>
+    <div><b>gated merges</b><span>A merge produces a commit only if the merged schema passes full validation.</span></div>
+    <div><b>round trip</b><span><code>apply(migration(A → B), A) ≡ B</code> — the script provably turns the old schema into the new one.</span></div>
+    <div><b>identity</b><span>A renamed column is the same column, through diff, merge and migration alike.</span></div>
+  </div>
+  <div class="note">
+    <p><span class="nlabel">Where the tests go</span> — parser golden files, table-driven diff cases, and for every conflict class C1–C8 a pair: one case that must conflict and one neighbouring case that must merge cleanly. Then the six invariants as properties, and one end-to-end pass over the API: create → import → branch → edit → diff → merge with conflict → resolve → migration.</p>
+  </div>
+</section>
+
+</article>
+
+<footer class="end">Mergebase · flow walkthrough · schema in, decisions surfaced, migration out — and never a hand on the database.</footer>
+</div>
+
+<script>
+(function(){
+  var root = document.documentElement, btn = document.getElementById('themeBtn');
+  btn.addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme');
+    var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (cur === 'auto') root.setAttribute('data-theme', dark ? 'light' : 'dark');
+    else if (cur === 'dark') root.setAttribute('data-theme','light');
+    else root.setAttribute('data-theme','dark');
+  });
+
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window){
+    var figs = document.querySelectorAll('figure');
+    figs.forEach(function(f){ f.classList.add('reveal'); });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, {rootMargin:'0px 0px -60px 0px', threshold:0.06});
+    figs.forEach(function(f){ io.observe(f); });
+  }
+})();
+</script>
+</body>
+</html>
