@@ -13,12 +13,15 @@ import (
 	"strings"
 
 	"mergebase/internal/diff"
+	"mergebase/internal/match"
 	"mergebase/internal/merge"
+	"mergebase/internal/migrate"
 	"mergebase/internal/ops"
 	"mergebase/internal/parser"
 	"mergebase/internal/schema"
 	"mergebase/internal/seed"
 	"mergebase/internal/store"
+	"mergebase/internal/validate"
 )
 
 // maxBodyBytes bounds request bodies; the largest legitimate payload is a
@@ -44,9 +47,11 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/branches/{id}/schema", s.branchSchema)
 	mux.HandleFunc("GET /api/branches/{id}/commits", s.branchCommits)
 	mux.HandleFunc("POST /api/branches/{id}/changes", s.applyChanges)
+	mux.HandleFunc("POST /api/branches/{id}/import", s.importDDL)
 	mux.HandleFunc("GET /api/diff", s.diff)
 	mux.HandleFunc("POST /api/merge/preview", s.mergePreview)
 	mux.HandleFunc("POST /api/merge", s.mergeExecute)
+	mux.HandleFunc("GET /api/migration", s.migration)
 	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
 }
 
@@ -313,6 +318,99 @@ func (s *Server) applyChanges(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusCreated, map[string]any{"commit_id": commit.ID, "message": message, "schema": next})
 }
 
+type importReq struct {
+	DDL       string           `json:"ddl"`
+	Message   string           `json:"message"`
+	Author    string           `json:"author"`
+	Decisions []match.Decision `json:"decisions"`
+	// Confirm commits even when rename proposals exist, treating any
+	// undecided proposal as drop + add. Without it, proposals come back
+	// for the user to answer — nothing is guessed silently.
+	Confirm bool `json:"confirm"`
+}
+
+// importDDL re-imports pasted DDL onto a branch. The parsed schema is
+// matched against the branch's own head so identity survives (invariant 7);
+// ambiguous renames come back as proposals instead of being guessed.
+func (s *Server) importDDL(w http.ResponseWriter, r *http.Request) {
+	branch, err := s.store.GetBranch(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "branch")
+		return
+	}
+	var req importReq
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.DDL) == "" {
+		s.error(w, http.StatusBadRequest, "missing_ddl", "There is no DDL to import.", "Paste the schema's SQL in the \"ddl\" field.")
+		return
+	}
+	parsed, err := parser.Parse(req.DDL)
+	if err != nil {
+		s.error(w, http.StatusUnprocessableEntity, "invalid_ddl", err.Error(),
+			"Fix the SQL and try again — Mergebase understands PostgreSQL CREATE TABLE, CREATE INDEX, and ALTER TABLE ADD COLUMN/CONSTRAINT.")
+		return
+	}
+	head, err := s.store.GetCommit(branch.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+
+	outcome := match.Rematch(head.Schema, parsed.Schema, req.Decisions)
+	if len(outcome.Proposals) > 0 && !req.Confirm {
+		s.json(w, http.StatusOK, map[string]any{
+			"needs_confirmation": true,
+			"proposals":          outcome.Proposals,
+		})
+		return
+	}
+
+	if problems := validate.Check(outcome.Schema); len(problems) > 0 {
+		s.json(w, http.StatusUnprocessableEntity, map[string]any{
+			"error": errBody{Code: "invalid_schema",
+				Message: "The imported schema is not coherent — nothing was committed.",
+				Hint:    "Fix the listed problems in the DDL and import again."},
+			"problems": problems,
+		})
+		return
+	}
+
+	changes := diff.Compute(head.Schema, outcome.Schema)
+	if len(changes.Changes) == 0 {
+		s.error(w, http.StatusUnprocessableEntity, "no_changes",
+			"The imported DDL matches the current schema exactly.", "There is nothing to commit.")
+		return
+	}
+	message := req.Message
+	if message == "" {
+		message = fmt.Sprintf("Re-import schema (%d changes)", len(changes.Changes))
+	}
+	commit := &store.Commit{
+		ProjectID: branch.ProjectID, Message: message, Author: req.Author,
+		ParentID: head.ID, Schema: outcome.Schema, Unsupported: parsed.Unsupported,
+	}
+	if err := s.store.CommitAndMoveHead(branch.ID, head.ID, commit); err != nil {
+		if errors.Is(err, store.ErrConcurrentUpdate) {
+			s.error(w, http.StatusConflict, "branch_moved",
+				"Someone else committed to this branch during the import.",
+				"Reload the branch and import again.")
+			return
+		}
+		s.internal(w, err)
+		return
+	}
+	_ = s.store.AppendEvent(branch.ProjectID, branch.ID, "ddl_imported",
+		map[string]any{"changes": len(changes.Changes), "commit": commit.ID})
+	s.json(w, http.StatusCreated, map[string]any{
+		"commit_id":   commit.ID,
+		"message":     message,
+		"changes":     changes.Changes,
+		"unsupported": parsed.Unsupported,
+	})
+}
+
 // diff compares two refs. A ref is a branch ID (its head is used) or a
 // commit ID — so "what changed on this branch" and "what changed between
 // these two commits" are the same endpoint.
@@ -436,11 +534,11 @@ func (s *Server) mergePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.json(w, http.StatusOK, map[string]any{
-		"clean":     len(result.Conflicts) == 0 && len(result.Problems) == 0,
-		"conflicts": result.Conflicts,
-		"problems":  result.Problems,
-		"changes":   result.Changes,
-		"target":    map[string]string{"id": target.ID, "name": target.Name},
+		"clean":       len(result.Conflicts) == 0 && len(result.Problems) == 0,
+		"conflicts":   result.Conflicts,
+		"problems":    result.Problems,
+		"changes":     result.Changes,
+		"target":      map[string]string{"id": target.ID, "name": target.Name},
 		"source_head": theirs.ID,
 	})
 }
@@ -495,6 +593,41 @@ func (s *Server) mergeExecute(w http.ResponseWriter, r *http.Request) {
 		"commit_id": commit.ID,
 		"message":   commit.Message,
 		"changes":   result.Changes,
+	})
+}
+
+// migration emits the ordered SQL carrying `from` to `to` (branch or commit
+// refs). ?format=sql returns plain text for copy/download; default is JSON
+// with per-statement phases and the data-dependent warnings.
+func (s *Server) migration(w http.ResponseWriter, r *http.Request) {
+	fromRef, toRef := r.URL.Query().Get("from"), r.URL.Query().Get("to")
+	if fromRef == "" || toRef == "" {
+		s.error(w, http.StatusBadRequest, "missing_refs",
+			"Both \"from\" and \"to\" refs are required.",
+			"Pass branch IDs or commit IDs as ?from=…&to=…")
+		return
+	}
+	from, fromName, err := s.resolveRef(fromRef)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "from_ref")
+		return
+	}
+	to, toName, err := s.resolveRef(toRef)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "to_ref")
+		return
+	}
+	script := migrate.Generate(from.Schema, to.Schema)
+	if r.URL.Query().Get("format") == "sql" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintf(w, "-- Mergebase migration: %s → %s\n-- Generated, never executed by Mergebase. Review before applying.\n\n%s",
+			fromName, toName, script.SQL())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]any{
+		"from": map[string]string{"ref": fromRef, "name": fromName},
+		"to":   map[string]string{"ref": toRef, "name": toName},
+		"sql":  script.SQL(), "statements": script.Statements, "warnings": script.Warnings,
 	})
 }
 

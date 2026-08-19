@@ -38,12 +38,12 @@ func TestEveryCheck(t *testing.T) {
 	users, orders := s.TableByName("users"), s.TableByName("orders")
 
 	// Break it in every way at once.
-	orders.Name = "users"                                       // duplicate table name
-	users.Columns[1].Name = "id"                                // duplicate column name
-	users.Columns[0].Nullable = true                            // nullable PK member
-	fk := &orders.Constraints[1]                                // the FK
-	fk.RefTableID = "gone"                                      // dangling FK target
-	orders.Indexes[0].Columns[0].ColumnID = "gone"              // index on missing column
+	orders.Name = "users"                                            // duplicate table name
+	users.Columns[1].Name = "id"                                     // duplicate column name
+	users.Columns[0].Nullable = true                                 // nullable PK member
+	fk := &orders.Constraints[1]                                     // the FK
+	fk.RefTableID = "gone"                                           // dangling FK target
+	orders.Indexes[0].Columns[0].ColumnID = "gone"                   // index on missing column
 	users.Constraints = append(users.Constraints, schema.Constraint{ // second PK
 		ID: schema.NewObjectID(), Kind: schema.PrimaryKey, ColumnIDs: []schema.ObjectID{users.Columns[0].ID},
 	})

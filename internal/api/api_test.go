@@ -356,3 +356,52 @@ func TestMergeJourneyOnSeededWorkspace(t *testing.T) {
 		t.Fatalf("merge message = %v", top["message"])
 	}
 }
+
+func TestImportWithRenameProposalFlow(t *testing.T) {
+	ts := newTestServer(t)
+	created := doJSON(t, "POST", ts.URL+"/api/projects", map[string]string{
+		"name": "shop",
+		"ddl":  "CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(255) NOT NULL);",
+	}, 201)
+	branchID := created["branch"].(map[string]any)["id"].(string)
+
+	sch := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/schema", nil, 200)
+	emailID := sch["schema"].(map[string]any)["tables"].([]any)[0].(map[string]any)["columns"].([]any)[1].(map[string]any)["id"].(string)
+
+	renamedDDL := "CREATE TABLE users (id BIGINT PRIMARY KEY, email_address VARCHAR(255) NOT NULL);"
+
+	// First round: the rename comes back as a proposal, nothing committed.
+	out := doJSON(t, "POST", ts.URL+"/api/branches/"+branchID+"/import",
+		map[string]any{"ddl": renamedDDL}, 200)
+	if out["needs_confirmation"] != true {
+		t.Fatalf("expected confirmation round, got %v", out)
+	}
+	p := out["proposals"].([]any)[0].(map[string]any)
+	if p["old_name"] != "email" || p["new_name"] != "email_address" {
+		t.Fatalf("proposal wrong: %v", p)
+	}
+
+	// Second round: confirm the rename — identity transplants into the commit.
+	out = doJSON(t, "POST", ts.URL+"/api/branches/"+branchID+"/import", map[string]any{
+		"ddl": renamedDDL,
+		"decisions": []map[string]any{
+			{"old_id": p["old_id"], "rename": true},
+		},
+	}, 201)
+	changes := out["changes"].([]any)
+	if len(changes) != 1 || changes[0].(map[string]any)["kind"] != "column_renamed" {
+		t.Fatalf("confirmed rename must diff as a rename, got %v", changes)
+	}
+	sch2 := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/schema", nil, 200)
+	col := sch2["schema"].(map[string]any)["tables"].([]any)[0].(map[string]any)["columns"].([]any)[1].(map[string]any)
+	if col["name"] != "email_address" || col["id"] != emailID {
+		t.Fatalf("identity lost through import: %v", col)
+	}
+
+	// Importing identical DDL again is a friendly no-op error.
+	out = doJSON(t, "POST", ts.URL+"/api/branches/"+branchID+"/import",
+		map[string]any{"ddl": renamedDDL}, 422)
+	if out["error"].(map[string]any)["code"] != "no_changes" {
+		t.Fatalf("want no_changes, got %v", out)
+	}
+}
