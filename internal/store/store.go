@@ -289,6 +289,22 @@ func (s *Store) CommitAndMoveHead(branchID, expectedHead string, c *Commit) erro
 	return tx.Commit()
 }
 
+// ResetAll deletes every row — used only by the demo-reset action, which
+// restores the seeded workspace afterwards.
+func (s *Store) ResetAll() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"events", "branches", "commits", "projects"} {
+		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+			return fmt.Errorf("resetting %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // ---- events (audit log) ----
 
 func (s *Store) AppendEvent(projectID, branchID, kind string, detail any) error {

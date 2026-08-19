@@ -1,0 +1,297 @@
+// Package api is the thin JSON layer between the UI and the engine/store.
+// It translates requests into calls and results into JSON; it holds no
+// domain logic. Every error response is {error: {code, message, hint}} with
+// a hint the user can act on.
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+
+	"mergebase/internal/parser"
+	"mergebase/internal/schema"
+	"mergebase/internal/seed"
+	"mergebase/internal/store"
+)
+
+// maxBodyBytes bounds request bodies; the largest legitimate payload is a
+// pasted DDL file, and 1 MiB of DDL is far beyond any real schema.
+const maxBodyBytes = 1 << 20
+
+type Server struct {
+	store *store.Store
+	log   *slog.Logger
+}
+
+func New(st *store.Store, log *slog.Logger) *Server {
+	return &Server{store: st, log: log}
+}
+
+// Register attaches all API routes to mux.
+func (s *Server) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("POST /api/projects", s.createProject)
+	mux.HandleFunc("GET /api/projects", s.listProjects)
+	mux.HandleFunc("GET /api/projects/{id}", s.getProject)
+	mux.HandleFunc("POST /api/projects/{id}/branches", s.createBranch)
+	mux.HandleFunc("GET /api/branches/{id}/schema", s.branchSchema)
+	mux.HandleFunc("GET /api/branches/{id}/commits", s.branchCommits)
+	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
+}
+
+// ---- handlers ----
+
+func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	s.json(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type createProjectReq struct {
+	Name   string `json:"name"`
+	DDL    string `json:"ddl"`
+	Author string `json:"author"`
+}
+
+type createProjectResp struct {
+	Project     store.Project        `json:"project"`
+	Branch      store.Branch         `json:"branch"`
+	CommitID    string               `json:"commit_id"`
+	Unsupported []parser.Unsupported `json:"unsupported"`
+}
+
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
+	var req createProjectReq
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if req.Name == "" {
+		s.error(w, http.StatusBadRequest, "missing_name", "The project needs a name.", "Include a non-empty \"name\" field.")
+		return
+	}
+
+	sch := &schema.Schema{}
+	var unsupported []parser.Unsupported
+	if req.DDL != "" {
+		res, err := parser.Parse(req.DDL)
+		if err != nil {
+			s.error(w, http.StatusUnprocessableEntity, "invalid_ddl", err.Error(),
+				"Fix the SQL and try again — Mergebase understands PostgreSQL CREATE TABLE, CREATE INDEX, and ALTER TABLE ADD COLUMN/CONSTRAINT.")
+			return
+		}
+		sch = res.Schema
+		unsupported = res.Unsupported
+	}
+
+	project, err := s.store.CreateProject(req.Name)
+	if err != nil {
+		s.error(w, http.StatusConflict, "project_exists",
+			fmt.Sprintf("A project named %q already exists.", req.Name),
+			"Pick a different name.")
+		return
+	}
+	message := "Initial schema import"
+	if req.DDL == "" {
+		message = "Empty project"
+	}
+	commit := &store.Commit{ProjectID: project.ID, Message: message, Author: req.Author, Schema: sch, Unsupported: unsupported}
+	if err := s.store.CreateCommit(commit); err != nil {
+		s.internal(w, err)
+		return
+	}
+	branch, err := s.store.CreateBranch(project.ID, "main", commit.ID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	_ = s.store.AppendEvent(project.ID, branch.ID, "project_created", map[string]any{"name": req.Name, "tables": len(sch.Tables)})
+
+	if unsupported == nil {
+		unsupported = []parser.Unsupported{}
+	}
+	s.json(w, http.StatusCreated, createProjectResp{Project: project, Branch: branch, CommitID: commit.ID, Unsupported: unsupported})
+}
+
+func (s *Server) listProjects(w http.ResponseWriter, _ *http.Request) {
+	projects, err := s.store.ListProjects()
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	if projects == nil {
+		projects = []store.Project{}
+	}
+	s.json(w, http.StatusOK, map[string]any{"projects": projects})
+}
+
+func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
+	project, err := s.store.GetProject(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "project")
+		return
+	}
+	branches, err := s.store.ListBranches(project.ID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	if branches == nil {
+		branches = []store.Branch{}
+	}
+	s.json(w, http.StatusOK, map[string]any{"project": project, "branches": branches})
+}
+
+type createBranchReq struct {
+	Name string `json:"name"`
+	// From is the branch ID to branch off (its current head becomes the
+	// new branch's starting commit).
+	From string `json:"from"`
+}
+
+func (s *Server) createBranch(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	var req createBranchReq
+	if !s.decode(w, r, &req) {
+		return
+	}
+	if req.Name == "" {
+		s.error(w, http.StatusBadRequest, "missing_name", "The branch needs a name.", "Include a non-empty \"name\" field.")
+		return
+	}
+	src, err := s.store.GetBranch(req.From)
+	if err != nil {
+		s.error(w, http.StatusNotFound, "branch_not_found",
+			"The branch to start from was not found.",
+			"Pass an existing branch's id as \"from\".")
+		return
+	}
+	if src.ProjectID != projectID {
+		s.error(w, http.StatusBadRequest, "cross_project_branch",
+			"The source branch belongs to a different project.",
+			"Branch from a branch of the same project.")
+		return
+	}
+	branch, err := s.store.CreateBranch(projectID, req.Name, src.HeadCommitID)
+	if err != nil {
+		s.error(w, http.StatusConflict, "branch_exists",
+			fmt.Sprintf("A branch named %q already exists in this project.", req.Name),
+			"Pick a different name.")
+		return
+	}
+	_ = s.store.AppendEvent(projectID, branch.ID, "branch_created", map[string]any{"name": req.Name, "from": src.Name})
+	s.json(w, http.StatusCreated, map[string]any{"branch": branch})
+}
+
+func (s *Server) branchSchema(w http.ResponseWriter, r *http.Request) {
+	branch, err := s.store.GetBranch(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "branch")
+		return
+	}
+	commit, err := s.store.GetCommit(branch.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]any{
+		"branch":      branch,
+		"commit":      commit,
+		"schema":      commit.Schema,
+		"unsupported": commit.Unsupported,
+	})
+}
+
+func (s *Server) branchCommits(w http.ResponseWriter, r *http.Request) {
+	branch, err := s.store.GetBranch(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "branch")
+		return
+	}
+	history, err := s.store.History(branch.HeadCommitID, 100)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	// History entries carry full snapshots; the list view only needs metadata.
+	type entry struct {
+		ID        string `json:"id"`
+		Message   string `json:"message"`
+		Author    string `json:"author"`
+		ParentID  string `json:"parent_id,omitempty"`
+		Parent2ID string `json:"parent2_id,omitempty"`
+		CreatedAt string `json:"created_at"`
+		Tables    int    `json:"tables"`
+	}
+	out := make([]entry, 0, len(history))
+	for _, c := range history {
+		out = append(out, entry{
+			ID: c.ID, Message: c.Message, Author: c.Author,
+			ParentID: c.ParentID, Parent2ID: c.Parent2ID,
+			CreatedAt: c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Tables:    len(c.Schema.Tables),
+		})
+	}
+	s.json(w, http.StatusOK, map[string]any{"commits": out})
+}
+
+func (s *Server) demoReset(w http.ResponseWriter, _ *http.Request) {
+	if err := s.store.ResetAll(); err != nil {
+		s.internal(w, err)
+		return
+	}
+	if err := seed.Ensure(s.store); err != nil {
+		s.internal(w, err)
+		return
+	}
+	s.json(w, http.StatusOK, map[string]string{"status": "demo restored"})
+}
+
+// ---- plumbing ----
+
+func (s *Server) decode(w http.ResponseWriter, r *http.Request, into any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_json",
+			"The request body is not valid JSON for this endpoint: "+err.Error(),
+			"Check the request payload against the API docs in the README.")
+		return false
+	}
+	return true
+}
+
+func (s *Server) json(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		s.log.Error("encoding response", "err", err)
+	}
+}
+
+type errBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+func (s *Server) error(w http.ResponseWriter, status int, code, message, hint string) {
+	s.json(w, status, map[string]errBody{"error": {Code: code, Message: message, Hint: hint}})
+}
+
+func (s *Server) internal(w http.ResponseWriter, err error) {
+	s.log.Error("internal error", "err", err)
+	s.error(w, http.StatusInternalServerError, "internal",
+		"Something went wrong on the server.", "Try again; if it persists, check the server logs.")
+}
+
+func (s *Server) notFoundOrInternal(w http.ResponseWriter, err error, what string) {
+	if errors.Is(err, store.ErrNotFound) {
+		s.error(w, http.StatusNotFound, what+"_not_found",
+			"The requested "+what+" does not exist.",
+			"It may have been removed by a demo reset — go back to the project list.")
+		return
+	}
+	s.internal(w, err)
+}
