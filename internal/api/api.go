@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"mergebase/internal/diff"
+	"mergebase/internal/merge"
 	"mergebase/internal/ops"
 	"mergebase/internal/parser"
 	"mergebase/internal/schema"
@@ -44,6 +45,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/branches/{id}/commits", s.branchCommits)
 	mux.HandleFunc("POST /api/branches/{id}/changes", s.applyChanges)
 	mux.HandleFunc("GET /api/diff", s.diff)
+	mux.HandleFunc("POST /api/merge/preview", s.mergePreview)
+	mux.HandleFunc("POST /api/merge", s.mergeExecute)
 	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
 }
 
@@ -353,6 +356,146 @@ func (s *Server) resolveRef(ref string) (*store.Commit, string, error) {
 		return nil, "", err
 	}
 	return c, "commit " + c.ID[:8], nil
+}
+
+type mergeReq struct {
+	// Source and Target are branch IDs: source (theirs) merges into target (ours).
+	Source      string             `json:"source"`
+	Target      string             `json:"target"`
+	Resolutions []merge.Resolution `json:"resolutions"`
+	Author      string             `json:"author"`
+}
+
+// mergeInput loads both branches, computes the merge-base, and runs the
+// three-way merge. Shared by preview and execute so what the user saw is
+// exactly what commits.
+func (s *Server) mergeInput(w http.ResponseWriter, r *http.Request) (*mergeReq, *merge.Result, store.Branch, *store.Commit, bool) {
+	var req mergeReq
+	if !s.decode(w, r, &req) {
+		return nil, nil, store.Branch{}, nil, false
+	}
+	source, err := s.store.GetBranch(req.Source)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "source_branch")
+		return nil, nil, store.Branch{}, nil, false
+	}
+	target, err := s.store.GetBranch(req.Target)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "target_branch")
+		return nil, nil, store.Branch{}, nil, false
+	}
+	if source.ProjectID != target.ProjectID {
+		s.error(w, http.StatusBadRequest, "cross_project_merge",
+			"The two branches belong to different projects.", "Merge branches of the same project.")
+		return nil, nil, store.Branch{}, nil, false
+	}
+	if source.ID == target.ID {
+		s.error(w, http.StatusBadRequest, "self_merge",
+			"A branch cannot merge into itself.", "Pick a different target branch.")
+		return nil, nil, store.Branch{}, nil, false
+	}
+
+	baseID, err := s.store.MergeBase(target.HeadCommitID, source.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return nil, nil, store.Branch{}, nil, false
+	}
+	base, err := s.store.GetCommit(baseID)
+	if err != nil {
+		s.internal(w, err)
+		return nil, nil, store.Branch{}, nil, false
+	}
+	ours, err := s.store.GetCommit(target.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return nil, nil, store.Branch{}, nil, false
+	}
+	theirs, err := s.store.GetCommit(source.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return nil, nil, store.Branch{}, nil, false
+	}
+
+	result, err := merge.Merge(merge.Input{
+		Base: base.Schema, Ours: ours.Schema, Theirs: theirs.Schema,
+		OursName: target.Name, TheirsName: source.Name,
+		Resolutions: req.Resolutions,
+	})
+	if err != nil {
+		s.error(w, http.StatusUnprocessableEntity, "invalid_resolution", err.Error(),
+			"Check each resolution's conflict_id, choice, and custom value.")
+		return nil, nil, store.Branch{}, nil, false
+	}
+
+	return &req, result, target, theirs, true
+}
+
+func (s *Server) mergePreview(w http.ResponseWriter, r *http.Request) {
+	_, result, target, theirs, ok := s.mergeInput(w, r)
+	if !ok {
+		return
+	}
+	s.json(w, http.StatusOK, map[string]any{
+		"clean":     len(result.Conflicts) == 0 && len(result.Problems) == 0,
+		"conflicts": result.Conflicts,
+		"problems":  result.Problems,
+		"changes":   result.Changes,
+		"target":    map[string]string{"id": target.ID, "name": target.Name},
+		"source_head": theirs.ID,
+	})
+}
+
+func (s *Server) mergeExecute(w http.ResponseWriter, r *http.Request) {
+	req, result, target, theirs, ok := s.mergeInput(w, r)
+	if !ok {
+		return
+	}
+	if len(result.Conflicts) > 0 {
+		s.json(w, http.StatusConflict, map[string]any{
+			"error": errBody{Code: "unresolved_conflicts",
+				Message: fmt.Sprintf("%d conflict(s) still need a resolution.", len(result.Conflicts)),
+				Hint:    "Resolve each conflict (ours / theirs / custom) and try again."},
+			"conflicts": result.Conflicts,
+		})
+		return
+	}
+	if len(result.Problems) > 0 {
+		s.json(w, http.StatusConflict, map[string]any{
+			"error": errBody{Code: "invalid_merged_schema",
+				Message: "The merged schema is not coherent — nothing was committed.",
+				Hint:    "Each branch is valid alone, but the combination is broken. Fix one side (or resolve differently) and retry."},
+			"problems": result.Problems,
+		})
+		return
+	}
+
+	sourceBranch, _ := s.store.GetBranch(req.Source)
+	commit := &store.Commit{
+		ProjectID: target.ProjectID,
+		Message:   fmt.Sprintf("Merge %s into %s", sourceBranch.Name, target.Name),
+		Author:    req.Author,
+		ParentID:  target.HeadCommitID,
+		Parent2ID: theirs.ID,
+		Schema:    result.Schema,
+	}
+	if err := s.store.CommitAndMoveHead(target.ID, target.HeadCommitID, commit); err != nil {
+		if errors.Is(err, store.ErrConcurrentUpdate) {
+			s.error(w, http.StatusConflict, "branch_moved",
+				"The target branch moved while you were resolving conflicts.",
+				"Re-open the merge preview against the new head and try again.")
+			return
+		}
+		s.internal(w, err)
+		return
+	}
+	_ = s.store.AppendEvent(target.ProjectID, target.ID, "merge",
+		map[string]any{"source": sourceBranch.Name, "target": target.Name,
+			"commit": commit.ID, "resolved_conflicts": len(req.Resolutions), "auto_changes": len(result.Changes)})
+	s.json(w, http.StatusCreated, map[string]any{
+		"commit_id": commit.ID,
+		"message":   commit.Message,
+		"changes":   result.Changes,
+	})
 }
 
 func (s *Server) demoReset(w http.ResponseWriter, _ *http.Request) {

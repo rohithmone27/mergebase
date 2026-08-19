@@ -214,6 +214,19 @@ func (t *Table) PrimaryKey() *Constraint {
 	return nil
 }
 
+// Clone returns a deep copy of the table sharing no memory with the receiver.
+func (t *Table) Clone() *Table {
+	raw, err := json.Marshal(t)
+	if err != nil {
+		panic(fmt.Sprintf("schema: marshaling table for clone: %v", err))
+	}
+	var out Table
+	if err := json.Unmarshal(raw, &out); err != nil {
+		panic(fmt.Sprintf("schema: unmarshaling table clone: %v", err))
+	}
+	return &out
+}
+
 // Clone returns a deep copy sharing no memory with the receiver.
 func (s *Schema) Clone() *Schema {
 	raw, err := json.Marshal(s)

@@ -264,3 +264,95 @@ func TestDiffEndpointOnSeededWorkspace(t *testing.T) {
 		t.Fatalf("rename degraded to drop+add: %s", joined)
 	}
 }
+
+// The reviewer journey as a test: seeded workspace → preview the merge of
+// feature/billing into main → hit the prepared conflict → resolve → merge
+// commits with two parents → history and schema reflect it.
+func TestMergeJourneyOnSeededWorkspace(t *testing.T) {
+	ts := newTestServer(t)
+	doJSON(t, "POST", ts.URL+"/api/demo/reset", nil, 200)
+
+	list := doJSON(t, "GET", ts.URL+"/api/projects", nil, 200)
+	projectID := list["projects"].([]any)[0].(map[string]any)["id"].(string)
+	detail := doJSON(t, "GET", ts.URL+"/api/projects/"+projectID, nil, 200)
+	var mainID, billingID string
+	for _, b := range detail["branches"].([]any) {
+		br := b.(map[string]any)
+		if br["name"] == "main" {
+			mainID = br["id"].(string)
+		} else {
+			billingID = br["id"].(string)
+		}
+	}
+
+	// Preview: one prepared conflict (email type), rename merges cleanly.
+	preview := doJSON(t, "POST", ts.URL+"/api/merge/preview",
+		map[string]any{"source": billingID, "target": mainID}, 200)
+	if preview["clean"] != false {
+		t.Fatalf("preview must not be clean: %v", preview)
+	}
+	conflicts := preview["conflicts"].([]any)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts = %d, want exactly the prepared one: %v", len(conflicts), conflicts)
+	}
+	c := conflicts[0].(map[string]any)
+	if c["class"] != "retype_retype" || c["ours"] != "varchar(500)" || c["theirs"] != "text" {
+		t.Fatalf("prepared conflict wrong: %v", c)
+	}
+
+	// Executing with the conflict unresolved must refuse.
+	refused := doJSON(t, "POST", ts.URL+"/api/merge",
+		map[string]any{"source": billingID, "target": mainID}, 409)
+	if refused["error"].(map[string]any)["code"] != "unresolved_conflicts" {
+		t.Fatalf("want unresolved_conflicts, got %v", refused)
+	}
+
+	// Resolve as theirs (text) and merge.
+	merged := doJSON(t, "POST", ts.URL+"/api/merge", map[string]any{
+		"source": billingID, "target": mainID, "author": "rohith",
+		"resolutions": []map[string]any{{"conflict_id": c["id"], "choice": "theirs"}},
+	}, 201)
+	if merged["commit_id"] == "" {
+		t.Fatal("merge must return the merge commit")
+	}
+
+	// The merged schema on main: invoices AND refunds, email is text,
+	// name renamed to full_name — identity preserved end to end.
+	sch := doJSON(t, "GET", ts.URL+"/api/branches/"+mainID+"/schema", nil, 200)
+	names := map[string]bool{}
+	var emailType string
+	var fullName bool
+	for _, tbl := range sch["schema"].(map[string]any)["tables"].([]any) {
+		tb := tbl.(map[string]any)
+		names[tb["name"].(string)] = true
+		if tb["name"] == "users" {
+			for _, col := range tb["columns"].([]any) {
+				cc := col.(map[string]any)
+				if cc["name"] == "email" {
+					emailType = cc["type"].(map[string]any)["base"].(string)
+				}
+				if cc["name"] == "full_name" {
+					fullName = true
+				}
+			}
+		}
+	}
+	for _, want := range []string{"users", "orders", "payments", "refunds", "invoices"} {
+		if !names[want] {
+			t.Fatalf("merged schema missing table %q: %v", want, names)
+		}
+	}
+	if emailType != "text" || !fullName {
+		t.Fatalf("merged users wrong: email=%s full_name=%v", emailType, fullName)
+	}
+
+	// History shows a merge commit with two parents.
+	commits := doJSON(t, "GET", ts.URL+"/api/branches/"+mainID+"/commits", nil, 200)
+	top := commits["commits"].([]any)[0].(map[string]any)
+	if top["parent2_id"] == nil || top["parent2_id"] == "" {
+		t.Fatalf("head must be a merge commit with two parents: %v", top)
+	}
+	if !strings.Contains(top["message"].(string), "Merge feature/billing into main") {
+		t.Fatalf("merge message = %v", top["message"])
+	}
+}

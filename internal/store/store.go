@@ -289,6 +289,58 @@ func (s *Store) CommitAndMoveHead(branchID, expectedHead string, c *Commit) erro
 	return tx.Commit()
 }
 
+// MergeBase returns the common ancestor for a three-way merge of the two
+// commits. With merge commits in the DAG, criss-cross histories can have
+// more than one lowest common ancestor; the selection rule is deterministic
+// and documented: breadth-first from b (first parent before second), the
+// first commit reached that is also an ancestor-or-self of a wins — so the
+// same merge always sees the same base.
+func (s *Store) MergeBase(aID, bID string) (string, error) {
+	ancestors := map[string]bool{}
+	if err := s.walk(aID, func(id string) bool { ancestors[id] = true; return true }); err != nil {
+		return "", err
+	}
+	var found string
+	err := s.walk(bID, func(id string) bool {
+		if ancestors[id] {
+			found = id
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return "", err
+	}
+	if found == "" {
+		return "", fmt.Errorf("commits %s and %s share no ancestor", aID, bID)
+	}
+	return found, nil
+}
+
+// walk visits commits breadth-first from id (self included, first parent
+// before second) until visit returns false.
+func (s *Store) walk(id string, visit func(string) bool) error {
+	queue := []string{id}
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == "" || seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		if !visit(cur) {
+			return nil
+		}
+		var p1, p2 sql.NullString
+		if err := s.db.QueryRow(`SELECT parent_id, parent2_id FROM commits WHERE id = ?`, cur).Scan(&p1, &p2); err != nil {
+			return wrapNotFound(err)
+		}
+		queue = append(queue, p1.String, p2.String)
+	}
+	return nil
+}
+
 // ResetAll deletes every row — used only by the demo-reset action, which
 // restores the seeded workspace afterwards.
 func (s *Store) ResetAll() error {
