@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"mergebase/internal/ops"
 	"mergebase/internal/parser"
 	"mergebase/internal/schema"
 	"mergebase/internal/seed"
@@ -39,6 +41,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{id}/branches", s.createBranch)
 	mux.HandleFunc("GET /api/branches/{id}/schema", s.branchSchema)
 	mux.HandleFunc("GET /api/branches/{id}/commits", s.branchCommits)
+	mux.HandleFunc("POST /api/branches/{id}/changes", s.applyChanges)
 	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
 }
 
@@ -233,6 +236,76 @@ func (s *Server) branchCommits(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	s.json(w, http.StatusOK, map[string]any{"commits": out})
+}
+
+type applyChangesReq struct {
+	Operations json.RawMessage `json:"operations"`
+	Message    string          `json:"message"`
+	Author     string          `json:"author"`
+}
+
+// applyChanges applies edit operations to the branch head and commits the
+// result. The head move is compare-and-swapped: if someone else committed
+// meanwhile, the client gets a conflict instead of silently clobbering them.
+func (s *Server) applyChanges(w http.ResponseWriter, r *http.Request) {
+	branch, err := s.store.GetBranch(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "branch")
+		return
+	}
+	var req applyChangesReq
+	if !s.decode(w, r, &req) {
+		return
+	}
+	operations, err := ops.UnmarshalOps(req.Operations)
+	if err != nil {
+		s.error(w, http.StatusBadRequest, "invalid_operations", err.Error(),
+			"Operations must be a JSON array of {op, ...} objects.")
+		return
+	}
+	if len(operations) == 0 {
+		s.error(w, http.StatusBadRequest, "no_operations", "There are no operations to apply.",
+			"Send at least one operation.")
+		return
+	}
+
+	head, err := s.store.GetCommit(branch.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	next, err := ops.Apply(head.Schema, operations)
+	if err != nil {
+		s.error(w, http.StatusUnprocessableEntity, "invalid_change", err.Error(),
+			"Nothing was committed — fix the operation and retry.")
+		return
+	}
+
+	message := req.Message
+	if message == "" {
+		parts := make([]string, 0, len(operations))
+		for _, op := range operations {
+			parts = append(parts, ops.Describe(head.Schema, op))
+		}
+		message = strings.Join(parts, "; ")
+	}
+	commit := &store.Commit{
+		ProjectID: branch.ProjectID, Message: message, Author: req.Author,
+		ParentID: head.ID, Schema: next, Unsupported: head.Unsupported,
+	}
+	if err := s.store.CommitAndMoveHead(branch.ID, head.ID, commit); err != nil {
+		if errors.Is(err, store.ErrConcurrentUpdate) {
+			s.error(w, http.StatusConflict, "branch_moved",
+				"Someone else committed to this branch while you were editing.",
+				"Reload the branch to see the latest schema, then re-apply your change.")
+			return
+		}
+		s.internal(w, err)
+		return
+	}
+	_ = s.store.AppendEvent(branch.ProjectID, branch.ID, "changes_applied",
+		map[string]any{"operations": len(operations), "commit": commit.ID})
+	s.json(w, http.StatusCreated, map[string]any{"commit_id": commit.ID, "message": message, "schema": next})
 }
 
 func (s *Server) demoReset(w http.ResponseWriter, _ *http.Request) {

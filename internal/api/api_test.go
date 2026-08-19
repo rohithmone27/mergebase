@@ -168,3 +168,52 @@ func TestDemoResetRestoresSeed(t *testing.T) {
 		t.Fatalf("demo branches = %d, want main + feature/billing", len(branches))
 	}
 }
+
+func TestApplyChanges(t *testing.T) {
+	ts := newTestServer(t)
+	created := doJSON(t, "POST", ts.URL+"/api/projects", map[string]string{
+		"name": "shop",
+		"ddl":  "CREATE TABLE t (id INT PRIMARY KEY, note TEXT);",
+	}, 201)
+	branchID := created["branch"].(map[string]any)["id"].(string)
+
+	sch := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/schema", nil, 200)
+	table := sch["schema"].(map[string]any)["tables"].([]any)[0].(map[string]any)
+	tableID := table["id"].(string)
+	noteID := table["columns"].([]any)[1].(map[string]any)["id"].(string)
+
+	// Rename note → comment via the API; auto-generated commit message.
+	out := doJSON(t, "POST", ts.URL+"/api/branches/"+branchID+"/changes", map[string]any{
+		"operations": []map[string]any{
+			{"op": "rename_column", "table_id": tableID, "column_id": noteID, "name": "comment"},
+		},
+	}, 201)
+	if out["message"] != "rename t.note → comment" {
+		t.Fatalf("auto message = %v", out["message"])
+	}
+
+	// The head moved and the rename preserved the column's ID.
+	sch2 := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/schema", nil, 200)
+	col := sch2["schema"].(map[string]any)["tables"].([]any)[0].(map[string]any)["columns"].([]any)[1].(map[string]any)
+	if col["name"] != "comment" || col["id"] != noteID {
+		t.Fatalf("rename lost identity: %v", col)
+	}
+	commits := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/commits", nil, 200)
+	if n := len(commits["commits"].([]any)); n != 2 {
+		t.Fatalf("commits = %d, want 2", n)
+	}
+
+	// A structurally invalid change commits nothing.
+	out = doJSON(t, "POST", ts.URL+"/api/branches/"+branchID+"/changes", map[string]any{
+		"operations": []map[string]any{
+			{"op": "rename_column", "table_id": tableID, "column_id": "missing", "name": "x"},
+		},
+	}, 422)
+	if out["error"].(map[string]any)["code"] != "invalid_change" {
+		t.Fatalf("want invalid_change, got %v", out)
+	}
+	commits = doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/commits", nil, 200)
+	if n := len(commits["commits"].([]any)); n != 2 {
+		t.Fatalf("failed change must not commit; commits = %d", n)
+	}
+}

@@ -1,0 +1,10 @@
+services:
+  mergebase:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - mergebase-data:/data
+
+volumes:
+  mergebase-data:
