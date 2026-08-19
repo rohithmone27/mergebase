@@ -1,0 +1,17 @@
+# binaries & build output
+/bin/
+/mergebase
+*.test
+web/dist/
+web/node_modules/
+
+# application state
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# environment & editor
+.env
+.DS_Store
