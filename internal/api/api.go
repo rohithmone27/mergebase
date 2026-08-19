@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	"mergebase/internal/diff"
 	"mergebase/internal/ops"
 	"mergebase/internal/parser"
 	"mergebase/internal/schema"
@@ -42,6 +43,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/branches/{id}/schema", s.branchSchema)
 	mux.HandleFunc("GET /api/branches/{id}/commits", s.branchCommits)
 	mux.HandleFunc("POST /api/branches/{id}/changes", s.applyChanges)
+	mux.HandleFunc("GET /api/diff", s.diff)
 	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
 }
 
@@ -306,6 +308,51 @@ func (s *Server) applyChanges(w http.ResponseWriter, r *http.Request) {
 	_ = s.store.AppendEvent(branch.ProjectID, branch.ID, "changes_applied",
 		map[string]any{"operations": len(operations), "commit": commit.ID})
 	s.json(w, http.StatusCreated, map[string]any{"commit_id": commit.ID, "message": message, "schema": next})
+}
+
+// diff compares two refs. A ref is a branch ID (its head is used) or a
+// commit ID — so "what changed on this branch" and "what changed between
+// these two commits" are the same endpoint.
+func (s *Server) diff(w http.ResponseWriter, r *http.Request) {
+	fromRef, toRef := r.URL.Query().Get("from"), r.URL.Query().Get("to")
+	if fromRef == "" || toRef == "" {
+		s.error(w, http.StatusBadRequest, "missing_refs",
+			"Both \"from\" and \"to\" refs are required.",
+			"Pass branch IDs or commit IDs as ?from=…&to=…")
+		return
+	}
+	from, fromName, err := s.resolveRef(fromRef)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "from_ref")
+		return
+	}
+	to, toName, err := s.resolveRef(toRef)
+	if err != nil {
+		s.notFoundOrInternal(w, err, "to_ref")
+		return
+	}
+	d := diff.Compute(from.Schema, to.Schema)
+	s.json(w, http.StatusOK, map[string]any{
+		"from": map[string]string{"ref": fromRef, "name": fromName, "commit_id": from.ID},
+		"to":   map[string]string{"ref": toRef, "name": toName, "commit_id": to.ID},
+		"diff": d,
+	})
+}
+
+// resolveRef turns a branch ID (preferred) or commit ID into a commit,
+// with a display name for the UI.
+func (s *Server) resolveRef(ref string) (*store.Commit, string, error) {
+	if branch, err := s.store.GetBranch(ref); err == nil {
+		c, err := s.store.GetCommit(branch.HeadCommitID)
+		return c, branch.Name, err
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, "", err
+	}
+	c, err := s.store.GetCommit(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	return c, "commit " + c.ID[:8], nil
 }
 
 func (s *Server) demoReset(w http.ResponseWriter, _ *http.Request) {

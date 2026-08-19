@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mergebase/internal/store"
@@ -215,5 +216,51 @@ func TestApplyChanges(t *testing.T) {
 	commits = doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/commits", nil, 200)
 	if n := len(commits["commits"].([]any)); n != 2 {
 		t.Fatalf("failed change must not commit; commits = %d", n)
+	}
+}
+
+func TestDiffEndpointOnSeededWorkspace(t *testing.T) {
+	ts := newTestServer(t)
+	doJSON(t, "POST", ts.URL+"/api/demo/reset", nil, 200)
+
+	list := doJSON(t, "GET", ts.URL+"/api/projects", nil, 200)
+	projectID := list["projects"].([]any)[0].(map[string]any)["id"].(string)
+	detail := doJSON(t, "GET", ts.URL+"/api/projects/"+projectID, nil, 200)
+	var mainID, billingID string
+	for _, b := range detail["branches"].([]any) {
+		br := b.(map[string]any)
+		switch br["name"] {
+		case "main":
+			mainID = br["id"].(string)
+		case "feature/billing":
+			billingID = br["id"].(string)
+		}
+	}
+
+	out := doJSON(t, "GET", ts.URL+"/api/diff?from="+mainID+"&to="+billingID, nil, 200)
+	if out["from"].(map[string]any)["name"] != "main" || out["to"].(map[string]any)["name"] != "feature/billing" {
+		t.Fatalf("ref names wrong: %v", out)
+	}
+	changes := out["diff"].(map[string]any)["changes"].([]any)
+	texts := make([]string, 0, len(changes))
+	for _, c := range changes {
+		texts = append(texts, c.(map[string]any)["text"].(string))
+	}
+	joined := strings.Join(texts, " | ")
+	// The seeded divergence, read main → billing: refunds disappears,
+	// invoices appears, email retypes varchar(500)→text, name renames.
+	for _, want := range []string{
+		"dropped table refunds",
+		"added table invoices",
+		"changed type of users.email: varchar(500) → text",
+		"renamed users.name → full_name",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("diff missing %q; got: %s", want, joined)
+		}
+	}
+	// The rename must NOT appear as drop+add — that would mean identity loss.
+	if strings.Contains(joined, "dropped column users.name") || strings.Contains(joined, "added column users.full_name") {
+		t.Fatalf("rename degraded to drop+add: %s", joined)
 	}
 }
