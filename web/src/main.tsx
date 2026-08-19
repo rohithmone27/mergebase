@@ -5,6 +5,9 @@ import { Layout } from "./App";
 import { Home } from "./pages/Home";
 import { ProjectPage } from "./pages/Project";
 import { BranchPage } from "./pages/Branch";
+import { DiffPage } from "./pages/Diff";
+import { MergePage } from "./pages/Merge";
+import { MigrationPage } from "./pages/Migration";
 import "./styles.css";
 
 const router = createBrowserRouter([
@@ -14,6 +17,9 @@ const router = createBrowserRouter([
       { path: "/", element: <Home /> },
       { path: "/projects/:projectId", element: <ProjectPage /> },
       { path: "/branches/:branchId", element: <BranchPage /> },
+      { path: "/projects/:projectId/diff", element: <DiffPage /> },
+      { path: "/projects/:projectId/merge", element: <MergePage /> },
+      { path: "/projects/:projectId/migration", element: <MigrationPage /> },
     ],
   },
 ]);

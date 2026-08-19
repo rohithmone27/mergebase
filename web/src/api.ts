@@ -1,4 +1,19 @@
-import type { ApiError, Branch, CommitMeta, Project, Schema, Unsupported } from "./types";
+import type {
+  ApiError,
+  Branch,
+  Change,
+  CommitMeta,
+  Conflict,
+  MigrationStatement,
+  MigrationWarning,
+  Op,
+  Problem,
+  Project,
+  Proposal,
+  Resolution,
+  Schema,
+  Unsupported,
+} from "./types";
 
 // RequestError carries the server's {code, message, hint} envelope so screens
 // can show the hint, not just a status code.
@@ -56,4 +71,54 @@ export const api = {
   branchCommits: (branchId: string) => request<{ commits: CommitMeta[] }>(`/api/branches/${branchId}/commits`),
 
   demoReset: () => request<{ status: string }>("/api/demo/reset", { method: "POST" }),
+
+  applyChanges: (branchId: string, operations: Op[], message: string, author: string) =>
+    request<{ commit_id: string; message: string; schema: Schema }>(`/api/branches/${branchId}/changes`, {
+      method: "POST",
+      body: JSON.stringify({ operations, message, author }),
+    }),
+
+  importDDL: (branchId: string, ddl: string, decisions: { old_id: string; rename: boolean }[], author: string) =>
+    request<{
+      needs_confirmation?: boolean;
+      proposals?: Proposal[];
+      commit_id?: string;
+      changes?: Change[];
+      unsupported?: Unsupported[];
+    }>(`/api/branches/${branchId}/import`, {
+      method: "POST",
+      body: JSON.stringify({ ddl, decisions, author }),
+    }),
+
+  diff: (from: string, to: string) =>
+    request<{
+      from: { ref: string; name: string; commit_id: string };
+      to: { ref: string; name: string; commit_id: string };
+      diff: { changes: Change[]; unchanged: number };
+    }>(`/api/diff?from=${from}&to=${to}`),
+
+  mergePreview: (source: string, target: string, resolutions: Resolution[]) =>
+    request<{
+      clean: boolean;
+      conflicts: Conflict[];
+      problems: Problem[];
+      changes: Change[];
+      target: { id: string; name: string };
+      source_head: string;
+    }>("/api/merge/preview", { method: "POST", body: JSON.stringify({ source, target, resolutions }) }),
+
+  merge: (source: string, target: string, resolutions: Resolution[], author: string) =>
+    request<{ commit_id: string; message: string; changes: Change[] }>("/api/merge", {
+      method: "POST",
+      body: JSON.stringify({ source, target, resolutions, author }),
+    }),
+
+  migration: (from: string, to: string) =>
+    request<{
+      from: { ref: string; name: string };
+      to: { ref: string; name: string };
+      sql: string;
+      statements: MigrationStatement[];
+      warnings: MigrationWarning[];
+    }>(`/api/migration?from=${from}&to=${to}`),
 };

@@ -90,6 +90,89 @@ export interface ApiError {
   hint?: string;
 }
 
+export interface Change {
+  kind: string;
+  table: string;
+  table_id: ObjectID;
+  object?: string;
+  object_id?: ObjectID;
+  from?: string;
+  to?: string;
+  text: string;
+}
+
+export interface Conflict {
+  id: string;
+  class: string;
+  table: string;
+  object?: string;
+  property: string;
+  base: string;
+  ours: string;
+  theirs: string;
+  description: string;
+  allow_custom: boolean;
+  custom_kind?: string;
+}
+
+export interface Resolution {
+  conflict_id: string;
+  choice: "ours" | "theirs" | "custom";
+  custom?: string;
+}
+
+export interface Problem {
+  code: string;
+  message: string;
+  table?: string;
+  object?: string;
+}
+
+export interface MigrationStatement {
+  phase: string;
+  sql: string;
+}
+
+export interface MigrationWarning {
+  code: string;
+  message: string;
+  sql: string;
+}
+
+export interface Proposal {
+  kind: "table" | "column";
+  table?: string;
+  old_id: ObjectID;
+  old_name: string;
+  new_id: ObjectID;
+  new_name: string;
+  confidence: number;
+  detail: string;
+}
+
+// Op mirrors internal/ops.Op — only the fields for its kind are set.
+export interface Op {
+  op: string;
+  table_id?: ObjectID;
+  column_id?: ObjectID;
+  constraint_id?: ObjectID;
+  index_id?: ObjectID;
+  name?: string;
+  column?: { name: string; type: DataType; nullable: boolean; default?: string };
+  columns?: { name: string; type: DataType; nullable: boolean; default?: string }[];
+  type?: DataType;
+  nullable?: boolean;
+  default?: string;
+  constraint?: {
+    kind: ConstraintKind;
+    column_ids?: ObjectID[];
+    ref_table_id?: ObjectID;
+    ref_column_ids?: ObjectID[];
+    expr?: string;
+  };
+  index?: { name: string; columns: IndexColumn[]; unique?: boolean; method?: string };
+}
+
 export function typeString(t: DataType): string {
   if (!t.params || t.params.length === 0) return t.base;
   return `${t.base}(${t.params.join(",")})`;

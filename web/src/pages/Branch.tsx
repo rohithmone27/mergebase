@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, CommitMeta, Schema, Unsupported } from "../types";
 import { ErrorBanner } from "./Home";
 import { SchemaBrowser } from "../components/SchemaBrowser";
+import { EditSchema } from "../components/EditSchema";
+import { ImportDDL } from "../components/ImportDDL";
 
 export function BranchPage() {
   const { branchId = "" } = useParams();
@@ -12,20 +14,24 @@ export function BranchPage() {
   const [unsupported, setUnsupported] = useState<Unsupported[]>([]);
   const [commits, setCommits] = useState<CommitMeta[]>([]);
   const [error, setError] = useState<RequestError | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [schemaRes, commitsRes] = await Promise.all([api.branchSchema(branchId), api.branchCommits(branchId)]);
+      setBranch(schemaRes.branch);
+      setSchema(schemaRes.schema);
+      setUnsupported(schemaRes.unsupported ?? []);
+      setCommits(commitsRes.commits);
+    } catch (e) {
+      if (e instanceof RequestError) setError(e);
+    }
+  }, [branchId]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const [schemaRes, commitsRes] = await Promise.all([api.branchSchema(branchId), api.branchCommits(branchId)]);
-        setBranch(schemaRes.branch);
-        setSchema(schemaRes.schema);
-        setUnsupported(schemaRes.unsupported ?? []);
-        setCommits(commitsRes.commits);
-      } catch (e) {
-        if (e instanceof RequestError) setError(e);
-      }
-    })();
-  }, [branchId]);
+    load();
+  }, [load]);
 
   if (error) return <ErrorBanner error={error} />;
   if (!branch || !schema) return <div className="loading">Loading branch…</div>;
@@ -38,6 +44,10 @@ export function BranchPage() {
           <span className="mono">{branch.name}</span>
         </h1>
         <span className="spacer" />
+        <button className="btn" onClick={() => setShowImport(true)}>Import DDL</button>
+        <button className="btn" onClick={() => setShowEdit(true)}>Edit schema</button>
+        <Link className="btn" to={`/projects/${branch.project_id}/diff?from=${branch.id}`}>Diff</Link>
+        <Link className="btn primary" to={`/projects/${branch.project_id}/merge?source=${branch.id}`}>Merge…</Link>
       </div>
 
       {unsupported.length > 0 && (
@@ -75,6 +85,9 @@ export function BranchPage() {
           ))}
         </aside>
       </div>
+
+      {showEdit && <EditSchema branchId={branch.id} schema={schema} onClose={() => setShowEdit(false)} onCommitted={load} />}
+      {showImport && <ImportDDL branchId={branch.id} onClose={() => setShowImport(false)} onCommitted={load} />}
     </>
   );
 }

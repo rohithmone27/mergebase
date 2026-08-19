@@ -114,7 +114,10 @@ func Merge(in Input) (*Result, error) {
 		return a.Property < b.Property
 	})
 
-	res := &Result{Conflicts: m.conflicts, Problems: []validate.Problem{}}
+	if m.conflicts == nil {
+		m.conflicts = []Conflict{} // JSON contract: always a list, never null
+	}
+	res := &Result{Conflicts: m.conflicts, Problems: []validate.Problem{}, Changes: []diff.Change{}}
 	if m.err != nil {
 		return nil, m.err
 	}
