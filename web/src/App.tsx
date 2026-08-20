@@ -1,6 +1,28 @@
-import { Link, Outlet } from "react-router-dom";
-import { useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { api } from "./api";
+import type { Branch, Project } from "./types";
+
+// ---- workspace context: pages tell the shell where the user is ----
+
+export interface Workspace {
+  projectId?: string;
+  projectName?: string;
+  branchId?: string;
+  // bump to make the sidebar refetch (e.g. after creating a branch)
+  version?: number;
+}
+
+const WorkspaceCtx = createContext<{ ws: Workspace; set: (w: Workspace) => void }>({
+  ws: {},
+  set: () => {},
+});
+
+export function useWorkspace() {
+  return useContext(WorkspaceCtx);
+}
+
+// ---- glyphs ----
 
 export function BranchGlyph({ size = 16 }: { size?: number }) {
   return (
@@ -23,8 +45,59 @@ export function TableGlyph() {
   );
 }
 
+// ---- shell ----
+
 export function Layout() {
+  const [ws, setWsState] = useState<Workspace>({});
+  const value = useMemo(
+    () => ({
+      ws,
+      set: (w: Workspace) =>
+        setWsState((prev) => {
+          if (
+            prev.projectId === w.projectId &&
+            prev.projectName === w.projectName &&
+            prev.branchId === w.branchId &&
+            (w.version === undefined || prev.version === w.version)
+          ) {
+            return prev;
+          }
+          return { ...w, version: w.version ?? prev.version };
+        }),
+    }),
+    [ws],
+  );
+
+  return (
+    <WorkspaceCtx.Provider value={value}>
+      <div className="shell">
+        <Sidebar />
+        <main className="content">
+          <Outlet />
+        </main>
+      </div>
+    </WorkspaceCtx.Provider>
+  );
+}
+
+function Sidebar() {
+  const { ws } = useWorkspace();
+  const location = useLocation();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    api.listProjects().then((r) => setProjects(r.projects)).catch(() => {});
+  }, [ws.projectId, ws.version, location.pathname]);
+
+  useEffect(() => {
+    if (!ws.projectId) {
+      setBranches([]);
+      return;
+    }
+    api.getProject(ws.projectId).then((r) => setBranches(r.branches)).catch(() => setBranches([]));
+  }, [ws.projectId, ws.version, location.pathname]);
 
   async function resetDemo() {
     if (!window.confirm("Reset the demo workspace? All projects and branches revert to the seeded state.")) return;
@@ -38,24 +111,63 @@ export function Layout() {
   }
 
   return (
-    <>
-      <header className="topbar">
-        <Link to="/" className="logo">
-          <span style={{ color: "var(--accent)" }}><BranchGlyph size={18} /></span>
-          mergebase
+    <aside className="sidebar">
+      <Link to="/" className="logo">
+        <span className="logo-mark"><BranchGlyph size={17} /></span>
+        mergebase
+      </Link>
+
+      <div className="side-section">
+        <div className="side-label">Projects</div>
+        {projects.map((p) => (
+          <NavLink key={p.id} to={`/projects/${p.id}`}
+            className={({ isActive }) => "side-item" + (isActive || ws.projectId === p.id ? " active" : "")}>
+            <TableGlyph />
+            <span className="trunc">{p.name}</span>
+          </NavLink>
+        ))}
+        <Link to="/" className="side-item quiet">
+          <span className="plus">+</span> All projects
         </Link>
-        <span className="tagline">version control for database schemas</span>
-        <span className="spacer" />
-        <span className="demo-pill" title="Anything you create here is for exploration, not safekeeping.">
-          demo · data may reset
-        </span>
-        <button className="btn quiet" onClick={resetDemo} disabled={resetting}>
+      </div>
+
+      {ws.projectId && branches.length > 0 && (
+        <>
+          <div className="side-section">
+            <div className="side-label">Branches</div>
+            {branches.map((b) => (
+              <NavLink key={b.id} to={`/branches/${b.id}`}
+                className={({ isActive }) => "side-item mono" + (isActive || ws.branchId === b.id ? " active" : "")}>
+                <BranchGlyph size={13} />
+                <span className="trunc">{b.name}</span>
+                {b.name === "main" && <span className="side-tag">default</span>}
+              </NavLink>
+            ))}
+          </div>
+          <div className="side-section">
+            <div className="side-label">Compare</div>
+            <NavLink to={`/projects/${ws.projectId}/diff`} className={({ isActive }) => "side-item" + (isActive ? " active" : "")}>
+              <span className="glyph-txt">±</span> Diff
+            </NavLink>
+            <NavLink to={`/projects/${ws.projectId}/merge`} className={({ isActive }) => "side-item" + (isActive ? " active" : "")}>
+              <span className="glyph-txt">⑂</span> Merge
+            </NavLink>
+            <NavLink to={`/projects/${ws.projectId}/migration`} className={({ isActive }) => "side-item" + (isActive ? " active" : "")}>
+              <span className="glyph-txt">≡</span> Migration
+            </NavLink>
+          </div>
+        </>
+      )}
+
+      <div className="side-foot">
+        <div className="demo-note">
+          <span className="dot" aria-hidden />
+          Demo workspace — data may reset. Explore freely.
+        </div>
+        <button className="btn ghost small" onClick={resetDemo} disabled={resetting}>
           {resetting ? "Resetting…" : "Reset demo"}
         </button>
-      </header>
-      <main className="page">
-        <Outlet />
-      </main>
-    </>
+      </div>
+    </aside>
   );
 }

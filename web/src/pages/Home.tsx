@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Project, Unsupported } from "../types";
-import { BranchGlyph } from "../App";
+import { BranchGlyph, useWorkspace } from "../App";
 
 const SAMPLE_DDL = `CREATE TABLE customers (
     id         BIGSERIAL PRIMARY KEY,
@@ -24,6 +24,11 @@ export function Home() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<RequestError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const { set: setWs } = useWorkspace();
+  useEffect(() => {
+    setWs({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function load() {
     try {
@@ -78,6 +83,40 @@ export function Home() {
               <span className="go" aria-hidden>→</span>
             </Link>
           ))}
+        </div>
+      )}
+
+      {projects !== null && projects.length > 0 && (
+        <div className="tour">
+          <div className="tour-title">The three-minute tour — the demo has a merge conflict waiting for you</div>
+          <div className="tour-steps">
+            <div className="card tour-step">
+              <span className="stepno">1</span>
+              <h4>Open the branches</h4>
+              <p>
+                <span className="mono">main</span> and <span className="mono">feature/billing</span> diverged from a
+                shared commit — one added refunds, the other invoices, and <b>both</b> retyped{" "}
+                <span className="mono">users.email</span>.
+              </p>
+            </div>
+            <div className="card tour-step">
+              <span className="stepno">2</span>
+              <h4>Diff, then merge</h4>
+              <p>
+                The diff reads as meaning, not text — renames stay renames. The merge combines everything except the
+                one true conflict, and asks you: <span className="mono">varchar(500)</span>,{" "}
+                <span className="mono">text</span>, or your own answer.
+              </p>
+            </div>
+            <div className="card tour-step">
+              <span className="stepno">3</span>
+              <h4>Take the migration</h4>
+              <p>
+                Validation proves the merged schema is coherent, then you get ordered SQL — dependency-safe, with
+                data hazards flagged. Generated, never executed.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 

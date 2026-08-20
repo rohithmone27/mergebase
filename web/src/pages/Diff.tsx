@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, Change } from "../types";
 import { ErrorBanner } from "./Home";
+import { useWorkspace } from "../App";
 import { ChangeList } from "../components/ChangeList";
 
 export function DiffPage() {
@@ -10,6 +11,7 @@ export function DiffPage() {
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [projectName, setProjectName] = useState("");
+  const { set: setWs } = useWorkspace();
   const [changes, setChanges] = useState<Change[] | null>(null);
   const [unchanged, setUnchanged] = useState(0);
   const [names, setNames] = useState<{ from: string; to: string }>({ from: "", to: "" });
@@ -22,6 +24,7 @@ export function DiffPage() {
     api.getProject(projectId).then((res) => {
       setBranches(res.branches);
       setProjectName(res.project.name);
+      setWs({ projectId, projectName: res.project.name });
       // Sensible default: main vs the first non-main branch.
       if (!params.get("from") && res.branches.length >= 2) {
         const main = res.branches.find((b) => b.name === "main") ?? res.branches[0];

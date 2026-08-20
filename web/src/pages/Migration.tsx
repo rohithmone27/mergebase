@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, MigrationWarning } from "../types";
 import { ErrorBanner } from "./Home";
+import { useWorkspace } from "../App";
 
 // The migration script view. Generated, never executed: Mergebase hands the
 // SQL over (view / copy / download) and never touches a real database.
@@ -11,6 +12,7 @@ export function MigrationPage() {
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [projectName, setProjectName] = useState("");
+  const { set: setWs } = useWorkspace();
   const [sql, setSql] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<MigrationWarning[]>([]);
   const [names, setNames] = useState({ from: "", to: "" });
@@ -21,7 +23,7 @@ export function MigrationPage() {
   const to = params.get("to") ?? "";
 
   useEffect(() => {
-    api.getProject(projectId).then((res) => { setBranches(res.branches); setProjectName(res.project.name); })
+    api.getProject(projectId).then((res) => { setBranches(res.branches); setProjectName(res.project.name); setWs({ projectId, projectName: res.project.name }); })
       .catch((e) => e instanceof RequestError && setError(e));
   }, [projectId]);
 

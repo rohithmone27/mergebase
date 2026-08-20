@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, Change, Conflict, Problem, Resolution } from "../types";
 import { ErrorBanner } from "./Home";
+import { useWorkspace } from "../App";
 import { ChangeList } from "../components/ChangeList";
 
 // The merge screen: pick source → target, preview the three-way merge,
@@ -14,6 +15,7 @@ export function MergePage() {
   const [params, setParams] = useSearchParams();
   const [branches, setBranches] = useState<Branch[]>([]);
   const [projectName, setProjectName] = useState("");
+  const { set: setWs } = useWorkspace();
   const [error, setError] = useState<RequestError | null>(null);
 
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
@@ -34,6 +36,7 @@ export function MergePage() {
     api.getProject(projectId).then((res) => {
       setBranches(res.branches);
       setProjectName(res.project.name);
+      setWs({ projectId, projectName: res.project.name });
       if (!params.get("target") && res.branches.length >= 2) {
         const main = res.branches.find((b) => b.name === "main") ?? res.branches[0];
         const other = res.branches.find((b) => b.id !== main.id)!;

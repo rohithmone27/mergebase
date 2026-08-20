@@ -6,7 +6,7 @@ import { ErrorBanner } from "./Home";
 import { SchemaBrowser } from "../components/SchemaBrowser";
 import { EditSchema } from "../components/EditSchema";
 import { ImportDDL } from "../components/ImportDDL";
-import { BranchGlyph } from "../App";
+import { BranchGlyph, useWorkspace } from "../App";
 
 export function BranchPage() {
   const { branchId = "" } = useParams();
@@ -19,6 +19,7 @@ export function BranchPage() {
   const [showImport, setShowImport] = useState(false);
   const [projectName, setProjectName] = useState("");
 
+  const { set: setWs } = useWorkspace();
   const load = useCallback(async () => {
     try {
       const [schemaRes, commitsRes] = await Promise.all([api.branchSchema(branchId), api.branchCommits(branchId)]);
@@ -26,7 +27,10 @@ export function BranchPage() {
       setSchema(schemaRes.schema);
       setUnsupported(schemaRes.unsupported ?? []);
       setCommits(commitsRes.commits);
-      api.getProject(schemaRes.branch.project_id).then((p) => setProjectName(p.project.name)).catch(() => {});
+      api.getProject(schemaRes.branch.project_id).then((p) => {
+        setProjectName(p.project.name);
+        setWs({ projectId: schemaRes.branch.project_id, projectName: p.project.name, branchId: schemaRes.branch.id });
+      }).catch(() => {});
     } catch (e) {
       if (e instanceof RequestError) setError(e);
     }

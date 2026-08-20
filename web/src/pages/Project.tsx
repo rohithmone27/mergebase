@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, RequestError } from "../api";
 import type { Branch, Project } from "../types";
 import { ErrorBanner } from "./Home";
-import { BranchGlyph } from "../App";
+import { BranchGlyph, useWorkspace } from "../App";
 
 export function ProjectPage() {
   const { projectId = "" } = useParams();
@@ -12,11 +12,13 @@ export function ProjectPage() {
   const [error, setError] = useState<RequestError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
+  const { set: setWs } = useWorkspace();
   async function load() {
     try {
       const res = await api.getProject(projectId);
       setProject(res.project);
       setBranches(res.branches);
+      setWs({ projectId, projectName: res.project.name, version: Date.now() });
     } catch (e) {
       if (e instanceof RequestError) setError(e);
     }
