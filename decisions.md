@@ -233,7 +233,26 @@ commit → ordered migration script. PostgreSQL dialect only, one shared workspa
 - **Cut / accepted trade-off:** UI regressions between browser runs can slip
   in unnoticed; accepted for a 6-day artifact and said out loud here.
 
-### 16. Migrations are generated, never executed — 2026-08-18
+### 16. The UI is an application shell, not a page — 2026-08-20 (after two design passes)
+
+- **Decision:** a dark, dense, editor-grade shell — persistent sidebar
+  (projects, branches with active state, Diff/Merge/Migration nav), IBM Plex
+  Mono as the identity face for everything schema-shaped, and history drawn
+  as a literal commit rail.
+- **Alternatives:** the first pass — a light "drafting paper" theme with
+  cards on a scrolling page. It was polished but read as an admin-dashboard
+  template: no navigation architecture, dead space, no first-glance identity.
+- **Reasoning:** the audience is backend engineers whose daily references are
+  editor-grade tools (Linear, TablePlus, GitHub). A tool about schemas and
+  merges should look like an instrument, not a document. The sidebar is the
+  structural fix — it makes the product navigable from anywhere and fills
+  the viewport with real hierarchy; the dark palette is the register fix.
+  Both design passes were verified by driving the full merge journey in a
+  real browser before committing.
+- **Cut:** light mode. One committed look, executed properly, over a theme
+  toggle nobody asked for in a 6-day artifact.
+
+### 17. Migrations are generated, never executed — 2026-08-18
 
 - **Decision:** the migration script is produced to view, copy, or download. Mergebase
   never connects to a user's database and never runs DDL.
