@@ -1,0 +1,13 @@
+# Render blueprint: one free web service running the production container.
+# The free tier's filesystem is ephemeral — the app treats that honestly:
+# seed-on-empty restores the demo workspace after any restart (recoverable
+# demo state, not persistence; see decisions.md).
+services:
+  - type: web
+    name: mergebase
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_PATH
+        value: /var/data/mergebase.db
