@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 func mustParse(t *testing.T, ddl string) *Result {

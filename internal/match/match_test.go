@@ -3,9 +3,9 @@ package match
 import (
 	"testing"
 
-	"mergebase/internal/merge"
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/merge"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 const ddl = `

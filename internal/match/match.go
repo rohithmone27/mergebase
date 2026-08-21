@@ -18,7 +18,7 @@ package match
 import (
 	"sort"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // Proposal is one candidate rename the user must confirm or reject.

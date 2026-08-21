@@ -1,4 +1,4 @@
-module mergebase
+module github.com/rohithmone27/mergebase
 
 go 1.25.0
 

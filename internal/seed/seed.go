@@ -11,9 +11,9 @@ package seed
 import (
 	"fmt"
 
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
-	"mergebase/internal/store"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/store"
 )
 
 const baseDDL = `

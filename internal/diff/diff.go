@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 type ChangeKind string

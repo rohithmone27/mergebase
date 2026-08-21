@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"slices"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // Kind discriminates the operation union.

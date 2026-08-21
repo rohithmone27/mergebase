@@ -30,9 +30,9 @@ import (
 	"strconv"
 	"strings"
 
-	"mergebase/internal/diff"
-	"mergebase/internal/schema"
-	"mergebase/internal/validate"
+	"github.com/rohithmone27/mergebase/internal/diff"
+	"github.com/rohithmone27/mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/validate"
 )
 
 type Choice string

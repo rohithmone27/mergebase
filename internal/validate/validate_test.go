@@ -3,8 +3,8 @@ package validate
 import (
 	"testing"
 
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 func valid(t *testing.T) *schema.Schema {

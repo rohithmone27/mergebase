@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 func base(t *testing.T) *schema.Schema {

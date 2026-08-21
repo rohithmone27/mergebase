@@ -10,7 +10,7 @@ package validate
 import (
 	"fmt"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // Problem is one coherence violation, written for humans.

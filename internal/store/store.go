@@ -19,8 +19,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // ErrConcurrentUpdate means the branch head moved between reading it and

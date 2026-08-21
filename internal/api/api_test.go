@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"mergebase/internal/store"
+	"github.com/rohithmone27/mergebase/internal/store"
 )
 
 func newTestServer(t *testing.T) *httptest.Server {

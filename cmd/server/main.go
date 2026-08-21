@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"mergebase/internal/api"
-	"mergebase/internal/seed"
-	"mergebase/internal/store"
-	"mergebase/web"
+	"github.com/rohithmone27/mergebase/internal/api"
+	"github.com/rohithmone27/mergebase/internal/seed"
+	"github.com/rohithmone27/mergebase/internal/store"
+	"github.com/rohithmone27/mergebase/web"
 )
 
 func main() {

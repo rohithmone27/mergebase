@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"mergebase/internal/ops"
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/ops"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 func baseSchema(t *testing.T) *schema.Schema {

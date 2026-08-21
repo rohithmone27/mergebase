@@ -12,16 +12,16 @@ import (
 	"net/http"
 	"strings"
 
-	"mergebase/internal/diff"
-	"mergebase/internal/match"
-	"mergebase/internal/merge"
-	"mergebase/internal/migrate"
-	"mergebase/internal/ops"
-	"mergebase/internal/parser"
-	"mergebase/internal/schema"
-	"mergebase/internal/seed"
-	"mergebase/internal/store"
-	"mergebase/internal/validate"
+	"github.com/rohithmone27/mergebase/internal/diff"
+	"github.com/rohithmone27/mergebase/internal/match"
+	"github.com/rohithmone27/mergebase/internal/merge"
+	"github.com/rohithmone27/mergebase/internal/migrate"
+	"github.com/rohithmone27/mergebase/internal/ops"
+	"github.com/rohithmone27/mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/seed"
+	"github.com/rohithmone27/mergebase/internal/store"
+	"github.com/rohithmone27/mergebase/internal/validate"
 )
 
 // maxBodyBytes bounds request bodies; the largest legitimate payload is a

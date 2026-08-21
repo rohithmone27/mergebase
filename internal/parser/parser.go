@@ -13,7 +13,7 @@ import (
 
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // Result is a parsed schema plus everything the model could not represent.

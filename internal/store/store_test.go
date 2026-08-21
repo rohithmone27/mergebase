@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mergebase/internal/parser"
+	"github.com/rohithmone27/mergebase/internal/parser"
 )
 
 func open(t *testing.T) *Store {

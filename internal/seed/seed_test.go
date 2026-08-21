@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mergebase/internal/store"
+	"github.com/rohithmone27/mergebase/internal/store"
 )
 
 func TestEnsureSeedsOnceAndPreservesIdentity(t *testing.T) {

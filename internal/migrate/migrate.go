@@ -28,7 +28,7 @@ import (
 	"slices"
 	"strings"
 
-	"mergebase/internal/schema"
+	"github.com/rohithmone27/mergebase/internal/schema"
 )
 
 // Statement is one emitted DDL statement with its phase, for display grouping.
