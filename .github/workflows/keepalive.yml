@@ -1,0 +1,16 @@
+# Keeps the free-tier demo warm so a reviewer's first click is instant
+# instead of waiting out a cold start. Render's free plan includes enough
+# instance hours to run this service always-on.
+name: Keep demo awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -fsS -m 30 https://mergebase.onrender.com/healthz

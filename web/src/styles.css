@@ -472,3 +472,38 @@ label.inline {
 .proposal-head { display: flex; gap: 0.55rem; align-items: center; font-size: 0.88rem; flex-wrap: wrap; }
 .proposal-head .mono { font-weight: 600; }
 .proposal-choice { display: flex; gap: 1.1rem; margin-top: 0.5rem; flex-wrap: wrap; }
+
+/* ================= commit graph ================= */
+
+.graph-card { overflow: hidden; }
+.graph-card > header {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0.95rem; border-bottom: 1px solid var(--line);
+  background: var(--card-head);
+  font-family: var(--mono); font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted);
+}
+.graph-card .graph-count { margin-left: auto; color: var(--faint); letter-spacing: 0.04em; }
+
+.graph-body { display: flex; align-items: flex-start; overflow-x: auto; }
+.graph-svg { flex-shrink: 0; display: block; padding: 0.55rem 0 0.55rem 0.4rem; }
+
+.graph-rows { list-style: none; margin: 0; padding: 0.55rem 0.95rem 0.55rem 0.2rem; flex: 1; min-width: 0; }
+.graph-row {
+  height: 34px; display: flex; align-items: center; gap: 0.8rem;
+  font-size: 0.84rem; min-width: 0;
+}
+.graph-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.graph-msg .merge-tag {
+  font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.06em;
+  color: var(--accent); background: var(--accent-soft);
+  padding: 0.08rem 0.35rem; border-radius: 4px; margin-right: 0.45rem; vertical-align: 1px;
+}
+.graph-meta {
+  margin-left: auto; display: flex; align-items: center; gap: 0.6rem;
+  color: var(--faint); font-size: 0.74rem; white-space: nowrap;
+}
+.head-tag {
+  color: var(--accent); background: var(--accent-soft);
+  padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem;
+}

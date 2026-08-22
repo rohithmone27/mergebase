@@ -289,6 +289,31 @@ func (s *Store) CommitAndMoveHead(branchID, expectedHead string, c *Commit) erro
 	return tx.Commit()
 }
 
+// ProjectGraph returns every commit in a project, newest first, with both
+// parents — enough for the UI to draw the actual commit DAG. Schemas are
+// omitted: the graph view needs shape and metadata, not snapshots.
+func (s *Store) ProjectGraph(projectID string, limit int) ([]*Commit, error) {
+	rows, err := s.db.Query(`SELECT id, project_id, message, author, parent_id, parent2_id, created_at
+		FROM commits WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Commit
+	for rows.Next() {
+		var c Commit
+		var parent, parent2 sql.NullString
+		var created string
+		if err := rows.Scan(&c.ID, &c.ProjectID, &c.Message, &c.Author, &parent, &parent2, &created); err != nil {
+			return nil, err
+		}
+		c.ParentID, c.Parent2ID = parent.String, parent2.String
+		c.CreatedAt, _ = time.Parse(timeFormat, created)
+		out = append(out, &c)
+	}
+	return out, rows.Err()
+}
+
 // MergeBase returns the common ancestor for a three-way merge of the two
 // commits. With merge commits in the DAG, criss-cross histories can have
 // more than one lowest common ancestor; the selection rule is deterministic

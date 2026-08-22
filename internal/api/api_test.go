@@ -405,3 +405,129 @@ func TestImportWithRenameProposalFlow(t *testing.T) {
 		t.Fatalf("want no_changes, got %v", out)
 	}
 }
+
+func TestExportDDLRoundTripsAndStatesCoverage(t *testing.T) {
+	ts := newTestServer(t)
+	created := doJSON(t, "POST", ts.URL+"/api/projects", map[string]string{
+		"name": "shop",
+		"ddl": `CREATE TABLE users (id BIGINT PRIMARY KEY, email VARCHAR(255) NOT NULL);
+		        CREATE TABLE orders (id BIGINT PRIMARY KEY, user_id BIGINT REFERENCES users (id));
+		        CREATE INDEX idx_orders_user ON orders (user_id);
+		        CREATE SEQUENCE legacy_seq;`,
+	}, 201)
+	branchID := created["branch"].(map[string]any)["id"].(string)
+
+	out := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/export", nil, 200)
+	sql := out["sql"].(string)
+
+	// The export must state what it does not carry — the sequence was
+	// recorded at import and is honestly absent here.
+	if !strings.Contains(sql, "Coverage:") || !strings.Contains(sql, "CREATE SEQ") {
+		t.Fatalf("export must state coverage including the unmodelled sequence:\n%s", sql)
+	}
+	for _, want := range []string{`CREATE TABLE "users"`, `CREATE TABLE "orders"`, "FOREIGN KEY", `CREATE INDEX "idx_orders_user"`} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("export missing %q:\n%s", want, sql)
+		}
+	}
+
+	// Re-importing the export into a fresh project must reproduce the same
+	// schema shape: export → import is lossless over the modelled subset.
+	round := doJSON(t, "POST", ts.URL+"/api/projects", map[string]any{"name": "round", "ddl": sql}, 201)
+	roundBranch := round["branch"].(map[string]any)["id"].(string)
+	orig := doJSON(t, "GET", ts.URL+"/api/branches/"+branchID+"/schema", nil, 200)
+	again := doJSON(t, "GET", ts.URL+"/api/branches/"+roundBranch+"/schema", nil, 200)
+
+	shape := func(res map[string]any) []string {
+		var out []string
+		for _, tbl := range res["schema"].(map[string]any)["tables"].([]any) {
+			tb := tbl.(map[string]any)
+			cols := []string{}
+			for _, c := range tb["columns"].([]any) {
+				cc := c.(map[string]any)
+				cols = append(cols, cc["name"].(string)+":"+cc["type"].(map[string]any)["base"].(string))
+			}
+			out = append(out, tb["name"].(string)+"("+strings.Join(cols, ",")+")")
+		}
+		return out
+	}
+	if a, b := strings.Join(shape(orig), "|"), strings.Join(shape(again), "|"); a != b {
+		t.Fatalf("export → import lost shape:\n orig: %s\n back: %s", a, b)
+	}
+
+	// The download form is plain text with a filename.
+	resp, err := http.Get(ts.URL + "/api/branches/" + branchID + "/export?format=sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("format=sql Content-Type = %q", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "main.sql") {
+		t.Fatalf("format=sql Content-Disposition = %q", cd)
+	}
+}
+
+func TestProjectGraphShowsForkAndJoin(t *testing.T) {
+	ts := newTestServer(t)
+	doJSON(t, "POST", ts.URL+"/api/demo/reset", nil, 200)
+	projectID := doJSON(t, "GET", ts.URL+"/api/projects", nil, 200)["projects"].([]any)[0].(map[string]any)["id"].(string)
+	detail := doJSON(t, "GET", ts.URL+"/api/projects/"+projectID, nil, 200)
+	var mainID, billingID string
+	for _, b := range detail["branches"].([]any) {
+		br := b.(map[string]any)
+		if br["name"] == "main" {
+			mainID = br["id"].(string)
+		} else {
+			billingID = br["id"].(string)
+		}
+	}
+
+	// Before merging: six commits, no merge node, and both branch heads
+	// are labelled on the graph.
+	g := doJSON(t, "GET", ts.URL+"/api/projects/"+projectID+"/graph", nil, 200)
+	nodes := g["commits"].([]any)
+	if len(nodes) != 5 {
+		t.Fatalf("seeded graph has %d commits, want 5", len(nodes))
+	}
+	heads := map[string]bool{}
+	for _, n := range nodes {
+		node := n.(map[string]any)
+		if node["is_merge"] == true {
+			t.Fatal("seeded graph must not contain a merge commit yet")
+		}
+		// "heads" is omitted for commits no branch points at.
+		if hs, ok := node["heads"].([]any); ok {
+			for _, h := range hs {
+				heads[h.(string)] = true
+			}
+		}
+	}
+	if !heads["main"] || !heads["feature/billing"] {
+		t.Fatalf("graph must label both branch heads, got %v", heads)
+	}
+
+	// Merge, then the graph gains a node with two parents — the join.
+	c := doJSON(t, "POST", ts.URL+"/api/merge/preview",
+		map[string]any{"source": billingID, "target": mainID}, 200)["conflicts"].([]any)[0].(map[string]any)
+	doJSON(t, "POST", ts.URL+"/api/merge", map[string]any{
+		"source": billingID, "target": mainID,
+		"resolutions": []map[string]any{{"conflict_id": c["id"], "choice": "theirs"}},
+	}, 201)
+
+	g = doJSON(t, "GET", ts.URL+"/api/projects/"+projectID+"/graph", nil, 200)
+	var merges int
+	for _, n := range g["commits"].([]any) {
+		node := n.(map[string]any)
+		if node["is_merge"] == true {
+			merges++
+			if len(node["parents"].([]any)) != 2 {
+				t.Fatalf("merge node must have two parents, got %v", node["parents"])
+			}
+		}
+	}
+	if merges != 1 {
+		t.Fatalf("graph has %d merge commits, want 1", merges)
+	}
+}

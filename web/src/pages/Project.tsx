@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, RequestError } from "../api";
-import type { Branch, Project } from "../types";
+import type { Branch, GraphCommit, Project } from "../types";
 import { ErrorBanner } from "./Home";
 import { BranchGlyph, useWorkspace } from "../App";
+import { CommitGraph } from "../components/CommitGraph";
 
 export function ProjectPage() {
   const { projectId = "" } = useParams();
@@ -11,6 +12,7 @@ export function ProjectPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [error, setError] = useState<RequestError | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [graph, setGraph] = useState<GraphCommit[]>([]);
 
   const { set: setWs } = useWorkspace();
   async function load() {
@@ -19,6 +21,7 @@ export function ProjectPage() {
       setProject(res.project);
       setBranches(res.branches);
       setWs({ projectId, projectName: res.project.name, version: Date.now() });
+      api.projectGraph(projectId).then((g) => setGraph(g.commits)).catch(() => {});
     } catch (e) {
       if (e instanceof RequestError) setError(e);
     }
@@ -72,6 +75,15 @@ export function ProjectPage() {
           </div>
         ))}
       </div>
+
+      {graph.length > 0 && (
+        <>
+          <p className="page-sub" style={{ marginTop: "1.8rem", marginBottom: "0.7rem" }}>
+            Every commit in this project, and how the branches diverged and rejoined.
+          </p>
+          <CommitGraph commits={graph} />
+        </>
+      )}
 
       {showCreate && (
         <CreateBranchModal

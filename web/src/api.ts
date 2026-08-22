@@ -8,6 +8,7 @@ import type {
   MigrationWarning,
   Op,
   Problem,
+  GraphCommit,
   Project,
   Proposal,
   Resolution,
@@ -69,6 +70,9 @@ export const api = {
     ),
 
   branchCommits: (branchId: string) => request<{ commits: CommitMeta[] }>(`/api/branches/${branchId}/commits`),
+
+  projectGraph: (projectId: string) =>
+    request<{ commits: GraphCommit[] }>(`/api/projects/${projectId}/graph`),
 
   demoReset: () => request<{ status: string }>("/api/demo/reset", { method: "POST" }),
 

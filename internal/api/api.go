@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -52,6 +53,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/merge/preview", s.mergePreview)
 	mux.HandleFunc("POST /api/merge", s.mergeExecute)
 	mux.HandleFunc("GET /api/migration", s.migration)
+	mux.HandleFunc("GET /api/branches/{id}/export", s.exportDDL)
+	mux.HandleFunc("GET /api/projects/{id}/graph", s.projectGraph)
 	mux.HandleFunc("POST /api/demo/reset", s.demoReset)
 }
 
@@ -599,6 +602,112 @@ func (s *Server) mergeExecute(w http.ResponseWriter, r *http.Request) {
 // migration emits the ordered SQL carrying `from` to `to` (branch or commit
 // refs). ?format=sql returns plain text for copy/download; default is JSON
 // with per-statement phases and the data-dependent warnings.
+// projectGraph returns the project's commit DAG plus where each branch head
+// points, so the UI can draw the real history: lines diverging from a shared
+// commit and rejoining at merges.
+func (s *Server) projectGraph(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, err := s.store.GetProject(projectID); err != nil {
+		s.notFoundOrInternal(w, err, "project")
+		return
+	}
+	commits, err := s.store.ProjectGraph(projectID, 200)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	branches, err := s.store.ListBranches(projectID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+
+	type node struct {
+		ID        string   `json:"id"`
+		Message   string   `json:"message"`
+		Author    string   `json:"author"`
+		Parents   []string `json:"parents"`
+		CreatedAt string   `json:"created_at"`
+		IsMerge   bool     `json:"is_merge"`
+		Heads     []string `json:"heads,omitempty"` // branch names whose head is this commit
+	}
+	headsByCommit := map[string][]string{}
+	for _, b := range branches {
+		headsByCommit[b.HeadCommitID] = append(headsByCommit[b.HeadCommitID], b.Name)
+	}
+
+	out := make([]node, 0, len(commits))
+	for _, c := range commits {
+		parents := []string{}
+		if c.ParentID != "" {
+			parents = append(parents, c.ParentID)
+		}
+		if c.Parent2ID != "" {
+			parents = append(parents, c.Parent2ID)
+		}
+		out = append(out, node{
+			ID: c.ID, Message: c.Message, Author: c.Author, Parents: parents,
+			CreatedAt: c.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			IsMerge:   c.Parent2ID != "", Heads: headsByCommit[c.ID],
+		})
+	}
+	s.json(w, http.StatusOK, map[string]any{"commits": out})
+}
+
+// exportDDL emits the branch's whole schema as PostgreSQL DDL — the same
+// generator that writes migrations, run from an empty schema, so exports and
+// migrations can never drift apart. The header states what the model does
+// not carry: constructs recorded at import but outside the supported subset
+// (the fidelity promise, honoured in both directions).
+func (s *Server) exportDDL(w http.ResponseWriter, r *http.Request) {
+	branch, err := s.store.GetBranch(r.PathValue("id"))
+	if err != nil {
+		s.notFoundOrInternal(w, err, "branch")
+		return
+	}
+	head, err := s.store.GetCommit(branch.HeadCommitID)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	script := migrate.Generate(&schema.Schema{}, head.Schema)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "-- Mergebase export: branch %s @ commit %s\n", branch.Name, head.ID[:8])
+	if n := len(head.Unsupported); n > 0 {
+		fmt.Fprintf(&b, "--\n-- Coverage: %d construct(s) from the original import are outside the\n"+
+			"-- modelled subset and are NOT represented below:\n", n)
+		for _, u := range head.Unsupported {
+			fmt.Fprintf(&b, "--   · %s%s\n", u.Construct, detailSuffix(u.Detail))
+		}
+	} else {
+		b.WriteString("-- Coverage: every construct in this schema is fully modelled.\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(script.SQL())
+
+	if r.URL.Query().Get("format") == "sql" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf("attachment; filename=%q", strings.ReplaceAll(branch.Name, "/", "-")+".sql"))
+		io.WriteString(w, b.String())
+		return
+	}
+	s.json(w, http.StatusOK, map[string]any{
+		"branch":      branch.Name,
+		"commit_id":   head.ID,
+		"sql":         b.String(),
+		"unsupported": head.Unsupported,
+	})
+}
+
+func detailSuffix(detail string) string {
+	if detail == "" {
+		return ""
+	}
+	return " — " + detail
+}
+
 func (s *Server) migration(w http.ResponseWriter, r *http.Request) {
 	fromRef, toRef := r.URL.Query().Get("from"), r.URL.Query().Get("to")
 	if fromRef == "" || toRef == "" {

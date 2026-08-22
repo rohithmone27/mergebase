@@ -252,7 +252,40 @@ commit → ordered migration script. PostgreSQL dialect only, one shared workspa
 - **Cut:** light mode. One committed look, executed properly, over a theme
   toggle nobody asked for in a 6-day artifact.
 
-### 17. Migrations are generated, never executed — 2026-08-18
+### 17. Property-based tests for the merge engine — 2026-08-23
+
+- **Decision:** add a randomized property suite on top of the taxonomy suite:
+  generate random schemas, diverge both sides with random edit sequences, and
+  assert four universal claims over 1,200 merges — fast-forward is identity,
+  identical edits never conflict, every resolved merge is deterministic and
+  passes validation, and disjoint edits only conflict through a global
+  namespace. Failures print the seed and both edit logs, so any counterexample
+  replays exactly.
+- **Alternatives:** more hand-written taxonomy cases (proves only what I
+  already thought of); a third-party quickcheck library (a dependency for
+  something 200 lines of stdlib `math/rand` does, with worse failure output).
+- **Reasoning:** the example-based suite proves the engine handles the cases
+  I imagined. The value of properties is the cases I did not — and they paid
+  for themselves immediately by forcing me to state a claim precisely enough
+  to be wrong (below).
+- **What it found:** my property "edits to disjoint tables always merge
+  cleanly" was **false**, and the engine was right while the test was wrong.
+  Column names, constraints, defaults and nullability are table-scoped, but
+  **table names and index names are global to the schema** — so two sides
+  editing entirely different tables can still collide by renaming into the
+  same name, or creating two indexes under one name. The property now states
+  that precisely: a disjoint-edit conflict must be a name collision, and
+  anything else is a defect. That distinction was an unexamined assumption
+  before the fuzzer made me write it down.
+- **Also found (test harness, not product):** an operation list containing
+  `add_column` cannot be replayed against a different starting snapshot,
+  because a fresh ObjectID is minted at apply time. The generator now returns
+  the evolved schema instead of a portable op log.
+- **Cut:** shrinking (minimizing a failing case automatically). Seeds plus
+  readable edit logs were enough to diagnose both findings in minutes; a
+  shrinker is real machinery for a benefit I did not need.
+
+### 18. Migrations are generated, never executed — 2026-08-18
 
 - **Decision:** the migration script is produced to view, copy, or download. Mergebase
   never connects to a user's database and never runs DDL.

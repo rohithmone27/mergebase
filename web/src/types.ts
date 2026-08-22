@@ -139,6 +139,16 @@ export interface MigrationWarning {
   sql: string;
 }
 
+export interface GraphCommit {
+  id: string;
+  message: string;
+  author: string;
+  parents: string[];
+  created_at: string;
+  is_merge: boolean;
+  heads?: string[];
+}
+
 export interface Proposal {
   kind: "table" | "column";
   table?: string;

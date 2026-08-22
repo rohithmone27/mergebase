@@ -1,8 +1,20 @@
 # Mergebase
 
+[![CI](https://github.com/rohithmone27/mergebase/actions/workflows/ci.yml/badge.svg)](https://github.com/rohithmone27/mergebase/actions/workflows/ci.yml)
+
 **Version control for database schemas** — branch a schema, evolve branches
 independently, see exactly what diverged, and merge back safely with conflict
 resolution, whole-schema validation, and an ordered migration script.
+
+**Live demo: <https://mergebase.onrender.com>** — opens on a seeded workspace
+with a merge conflict already waiting.
+
+![Resolving a merge conflict](docs/screenshots/merge-conflict.png)
+
+*Both branches retyped `users.email` differently. Everything else merged on its
+own; this one stops and asks — ours, theirs, or a value neither side proposed.*
+
+![Browsing a branch's schema](docs/screenshots/branch-view.png)
 
 Your code lives in Git; the database schema everything stands on usually
 doesn't. Two people change it in parallel and reconcile by hand. Mergebase
@@ -29,6 +41,8 @@ rejected, what was deliberately cut — is logged in **[decisions.md](decisions.
 - **Validate**: a merge only commits if the combined schema is coherent.
   Conflict detection finds where branches disagree; validation finds where
   their agreement is still broken (an FK at a table the other side dropped).
+- **Export**: download any branch's schema as PostgreSQL DDL, with a header
+  stating exactly which constructs the model does not carry.
 - **Migrate**: get ordered DDL that carries one version to the other —
   phase-ordered (cycle-proof, even for circular foreign keys), renames stay
   renames so data survives, and data-dependent hazards are flagged as
@@ -111,7 +125,14 @@ Browser (React/TS) ── JSON ──► Go HTTP server (thin API layer)
 go test ./...
 ```
 
-Eleven packages, with the depth where the risk lives: the conflict taxonomy
+Eleven packages, with the depth where the risk lives. Alongside the
+example-based suites there are **property-based tests**: 1,200 randomized
+merges asserting four universal claims — fast-forward is identity, identical
+edits never conflict, every resolved merge is deterministic and passes
+validation, and disjoint edits only conflict through a global namespace.
+(That last property was initially stated too strongly and the engine was
+right: table and index names are global, so edits to *different* tables can
+still collide. See decisions.md #17.) Plus the conflict taxonomy
 tested in both directions (each class has a must-conflict case and an
 adjacent must-merge-cleanly case), migration phase-ordering proofs including
 circular FKs and rename swaps, parser fidelity goldens, storage CAS races,

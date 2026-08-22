@@ -59,6 +59,10 @@ export function BranchPage() {
           <span className="mono">{branch.name}</span>
         </h1>
         <span className="spacer" />
+        <a className="btn" href={`/api/branches/${branch.id}/export?format=sql`}
+          download={`${branch.name.replace(/\//g, "-")}.sql`}>
+          Export SQL
+        </a>
         <button className="btn" onClick={() => setShowImport(true)}>Import DDL</button>
         <button className="btn" onClick={() => setShowEdit(true)}>Edit schema</button>
         <Link className="btn" to={`/projects/${branch.project_id}/diff?from=${branch.id}`}>Diff</Link>
