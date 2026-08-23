@@ -1,6 +1,11 @@
 # Keeps the free-tier demo warm so a reviewer's first click is instant
 # instead of waiting out a cold start. Render's free plan includes enough
 # instance hours to run this service always-on.
+#
+# The timeout is generous on purpose: if the instance has already gone to
+# sleep, this request is the one paying the wake-up cost, and waking it is
+# the whole point. Failing after 30s would report "broken" for a ping that
+# was doing exactly its job.
 name: Keep demo awake
 
 on:
@@ -13,4 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping health endpoint
-        run: curl -fsS -m 30 https://mergebase.onrender.com/healthz
+        run: |
+          curl -fsS --max-time 120 --retry 3 --retry-delay 15 --retry-all-errors \
+            https://mergebase.onrender.com/healthz

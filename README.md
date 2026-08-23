@@ -8,6 +8,9 @@ resolution, whole-schema validation, and an ordered migration script.
 
 **Live demo: <https://mergebase.onrender.com>** — opens on a seeded workspace
 with a merge conflict already waiting.
+**[How it works](https://mergebase.onrender.com/how-it-works.html)** — the
+mechanism, illustrated: why a rename is not a drop-plus-add, the merge algebra,
+and why migration statements are phased rather than sorted.
 
 ![Resolving a merge conflict](docs/screenshots/merge-conflict.png)
 
