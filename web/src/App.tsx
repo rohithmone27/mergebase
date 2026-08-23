@@ -159,13 +159,6 @@ function Sidebar() {
         </>
       )}
 
-      <div className="side-section">
-        <div className="side-label">Learn</div>
-        <a className="side-item" href="/how-it-works.html" target="_blank" rel="noreferrer">
-          <span className="glyph-txt">?</span> How it works
-        </a>
-      </div>
-
       <div className="side-foot">
         <div className="demo-note">
           <span className="dot" aria-hidden />
